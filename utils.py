@@ -26,11 +26,11 @@ def get_news(ticker_symbol):
     Returns a list of news items using DuckDuckGo.
     """
     try:
-        # Try specific query first
-        results = DDGS().news(keywords=f"{ticker_symbol} stock", region="us-en", safesearch="off", max_results=10)
-        # Fallback if empty (some crypto stocks or specific names might fail with "stock")
+        # Try specific query first (Past Year)
+        results = DDGS().news(keywords=f"{ticker_symbol} stock", region="us-en", safesearch="off", timelimit="y", max_results=10)
+        # Fallback
         if not results:
-            results = DDGS().news(keywords=f"{ticker_symbol} news", region="us-en", safesearch="off", max_results=10)
+            results = DDGS().news(keywords=f"{ticker_symbol} news", region="us-en", safesearch="off", timelimit="y", max_results=10)
         return results
     except Exception as e:
         print(f"Error fetching news: {e}")
@@ -59,6 +59,8 @@ def summarize_news_with_ai(news_items, api_key):
         Then, list the top 3 most important articles from the provided list. For each, strictly format it as:
         - **[Title]**: Why it's worth reading.
         
+        **IMPORTANT**: Ensure there are spaces between words. Do not use random `**` in the middle of sentences.
+
         News Items:
         {news_text}
         """
@@ -265,9 +267,9 @@ def search_earnings_context(ticker_symbol):
     Searches for earnings call takeaways and financial analysis.
     """
     try:
-        # Search for earnings takeaways, analyst notes (using news as text search is unreliable)
+        # Search for earnings take aways (Past Year)
         query = f"{ticker_symbol} earnings analysis bull bear thesis"
-        results = DDGS().news(keywords=query, region="us-en", safesearch="off", max_results=5)
+        results = DDGS().news(keywords=query, region="us-en", safesearch="off", timelimit="y", max_results=5)
         return results
     except Exception as e:
         print(f"Error searching earnings context: {e}")
@@ -293,19 +295,24 @@ def synthesize_core_focus(ticker, context_results, api_key):
         prompt = f"""
         You are a senior investment strategist. Based on the following search results regarding {ticker}'s recent earnings and financial reports:
         
-        Provide a balanced strategic view.
+        Provide a balanced strategic view. 
+        **Style Guide**: Write in a smooth, professional narrative. **Do not** force numbers if they make the sentence choppy. Instead, weave them naturally into the explanation (e.g., "...driven by a 20% surge in revenue..."). Avoid using asterisks (*) for emphasis inside sentences.
         
-        1. **🐂 Bull Case (Optimistic)**: What is the main argument for buying? (e.g. accelerating growth, AI leadership).
-        2. **🐻 Bear Case (Pessimistic)**: What is the main risk or argument for selling? (e.g. compression margins, competition).
-        3. **🔑 Key Variance**: What is the ONE critical assumption where bulls and bears disagree?
+        1. **🐂 Bull Case (Optimistic)**: Main argument for buying. Support with specific product success or growth metrics where they fit naturally.
+        2. **🐻 Bear Case (Pessimistic)**: Main risk. Support with valuation concerns or margin compression facts.
+        3. **🔑 Key Variance**: Where do bulls and bears disagree?
+
+        **Formatting Checks**:
+        - Ensure proper spacing between words (e.g., "The 300 Billion" not "The300Billion").
+        - Do not use `**` inside the narrative paragraphs.
         
         Context:
         {context_text}
         
         Output format:
-        **🐂 Bull Case**: [2-3 sentences]
+        **🐂 Bull Case**: [Narrative paragraph]
         
-        **🐻 Bear Case**: [2-3 sentences]
+        **🐻 Bear Case**: [Narrative paragraph]
         
         **🔑 Key Variance**: [1 sentence]
         """
@@ -315,13 +322,76 @@ def synthesize_core_focus(ticker, context_results, api_key):
     except Exception as e:
         return f"Error synthesizing core focus: {e}"
 
+def search_key_events(ticker_symbol):
+    """
+    Searches for major events (Past 3 months & Future 3 months).
+    """
+    try:
+        # Search 1: Recent Past
+        query_past = f"{ticker_symbol} major corporate events news last 3 months"
+        results_past = DDGS().news(keywords=query_past, region="us-en", safesearch="off", max_results=3)
+        
+        # Search 2: Upcoming Future
+        query_future = f"{ticker_symbol} upcoming major events earnings product launch next 3 months"
+        results_future = DDGS().news(keywords=query_future, region="us-en", safesearch="off", max_results=3)
+        
+        # Combine unique results
+        all_results = results_past + results_future
+        return all_results
+    except Exception as e:
+        print(f"Error searching key events: {e}")
+        return []
+
+def synthesize_key_events(ticker, context_results, api_key):
+    """
+    Summarizes Major Events (Timeline: Past & Future).
+    """
+    if not api_key or not context_results:
+        return "No major events found."
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-3-flash-preview')
+        
+        context_text = ""
+        for item in context_results:
+            context_text += f"- Title: {item.get('title')}\n  Date: {item.get('date')}\n  Snippet: {item.get('body')}\n"
+            
+        prompt = f"""
+        Identify the Major Corporate Events for {ticker}.
+        Categorize into "Recent" (Past 3 Months) and "Upcoming" (Next 3 Months).
+        
+        Focus on: Earnings, Product Launches, M&A, FDA approvals, or specific conference dates.
+        
+        Output format:
+        **🕒 Recent Highlights (Past 3 Months)**:
+        * **[Date] - [Event]**: [Impact]
+        
+        **🔮 Upcoming Catalysts (Next 3 Months)**:
+        * **[Est. Date] - [Event]**: [Why it matters]
+
+        **IMPORTANT**: 
+        - Ensure proper spacing (e.g. "The 300 Billion" NOT "The300Billion").
+        - Do not generate texts like "The 300BillionOpenAIContract **". format strictly as "**Date - Event**: Description".
+        
+        If no upcoming events are found, explicit state "No major confirmed upcoming events found."
+        
+        Context:
+        {context_text}
+        """
+        
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error synthesizing key events: {e}"
+
 def search_financial_analysis(ticker_symbol):
     """
     Searches for specific analysis on financial results (Why revenue/margins changed).
     """
     try:
         query = f"{ticker_symbol} financial results analysis revenue profit drivers"
-        results = DDGS().news(keywords=query, region="us-en", safesearch="off", max_results=5)
+        results = DDGS().news(keywords=query, region="us-en", safesearch="off", timelimit="y", max_results=5)
         return results
     except Exception as e:
         print(f"Error searching financial analysis: {e}")
@@ -348,18 +418,25 @@ def synthesize_financial_changes(ticker, context_results, api_key):
         You are a financial analyst. Based on the following search results regarding {ticker}'s recent financial results:
         
         Explain the "WHY" behind the movement of key metrics.
+        **CRITICAL**: When discussing financing (Debt, Convertibles, Equity raises), you MUST provide specific facts found in the text:
+        - How much was raised? (e.g. $500M)
+        - At what price/interest rate? (e.g. converted at $12.50, or 5% coupon)
+        - With whom? (if mentioned)
+
+        **Formatting Rules**:
+        - Use normal text, minimal bolding. 
+        - **AVOID** detached `**` characters.
+        - Ensure spaces between words.
         
         Output format:
         **Revenue Drivers**:
         * [Reason 1]
-        * [Reason 2]
         
-        **Profitability & Margins (Gross/EBITDA)**:
+        **Profitability & Margins**:
         * [Reason 1]
-        * [Reason 2]
         
-        **Operating Cash Flow & Capital**:
-        * [Reason 1]
+        **Operating Cash Flow & Capital (Specifics Required)**:
+        * [Reason 1 - citing specific amounts/rates]
         
         Context:
         {context_text}
@@ -376,7 +453,7 @@ def search_revenue_segments(ticker_symbol):
     """
     try:
         query = f"{ticker_symbol} revenue breakdown by segment earnings report"
-        results = DDGS().news(keywords=query, region="us-en", safesearch="off", max_results=5)
+        results = DDGS().news(keywords=query, region="us-en", safesearch="off", timelimit="y", max_results=5)
         return results
     except Exception as e:
         print(f"Error searching revenue segments: {e}")
@@ -560,9 +637,17 @@ def get_sankey_data(ticker_symbol, financials, segments_json):
         if inc.empty:
             return None
         
-        # Get most recent quarter
+        # Get most recent quarter label
         col = inc.columns[0]
         recent = inc[col]
+        
+        # Format date to YYQx (e.g. 2024-09-30 -> 24Q3)
+        try:
+            date_obj = pd.to_datetime(col)
+            quarter = (date_obj.month - 1) // 3 + 1
+            period_label = f"{date_obj.year % 100}Q{quarter}"
+        except:
+            period_label = str(col).split(' ')[0]
 
         # Extract Core Values (Absolute positives)
         total_rev = abs(recent.get('Total Revenue', 0))
@@ -599,6 +684,7 @@ def get_sankey_data(ticker_symbol, financials, segments_json):
         target = []
         value = []
         link_colors = []
+        custom_data = [] # For tooltip strings
         
         # Helper to get index
         def get_idx(name, color):
@@ -616,13 +702,18 @@ def get_sankey_data(ticker_symbol, financials, segments_json):
             target.append(t)
             value.append(val)
             link_colors.append(link_color if link_color else "rgba(180, 180, 180, 0.5)")
+            
+            # Format value for tooltip (B or M)
+            fmt_val = format_large_number(val)
+            custom_data.append(fmt_val)
 
         # 1. Segments -> Revenue
         segments_total = 0
         try:
             segs = json.loads(segments_json)
             if segs:
-                for s in segs:
+                sorted_segs = sorted(segs, key=lambda x: float(x.get('value', 0)), reverse=True)
+                for s in sorted_segs:
                     val = float(s['value']) * 1e9 
                     add_link(f"{s['label']}", "#5DADE2", "Total Revenue", COLOR_REV, val, "rgba(93, 173, 226, 0.3)")
                     segments_total += val
@@ -634,6 +725,7 @@ def get_sankey_data(ticker_symbol, financials, segments_json):
         add_link("Total Revenue", COLOR_REV, "Gross Profit", COLOR_GP, gross_profit, "rgba(40, 180, 99, 0.3)")
         
         # 3. Gross Profit -> OpEx & Op Income
+        # Define OpEx nodes first to ensure order? Plotly arranges automatically.
         if rd > 0:
             add_link("Gross Profit", COLOR_GP, "R&D", COLOR_OPEX, rd, "rgba(243, 156, 18, 0.3)")
         if sga > 0:
@@ -652,21 +744,17 @@ def get_sankey_data(ticker_symbol, financials, segments_json):
         # Format Labels with Value
         formatted_labels = []
         for l in labels:
-            # Find value associated with this node (simplified: sum of incoming or outgoing?)
-            # Plotly calculates size automatically, but label doesn't show it.
-            # We can try to attach the total flow to the label.
-            # Simple heuristic: Just use the name. Hover will show value. 
-            # Or formatted: "Name" (Value in chart is auto)
-            # Let's clean up label names for "Total Revenue"
             formatted_labels.append(l)
 
         return {
+            "period": period_label, # New field
             "label": formatted_labels,
             "color": node_colors,
             "source": source,
             "target": target,
             "value": value,
-            "link_color": link_colors
+            "link_color": link_colors,
+            "custom_data": custom_data
         }
 
     except Exception as e:

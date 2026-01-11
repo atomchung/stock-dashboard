@@ -29,46 +29,56 @@ with st.sidebar:
     
     st.info("💡 Providing an API Key enables AI news & strategy analysis.")
 
-def create_compact_bar_chart(dates, values, title, color):
+def create_compact_bar_chart(x_data, y_data, title, color):
     """
-    Helper to create a compact bar chart with growth annotations and clean tooltips.
+    Creates a compact bar chart with values and QoQ growth.
     """
-    # Calculate Growth
-    growth_texts = []
-    for i in range(len(values)):
-        if i == 0:
-            growth_texts.append("")
-        else:
-            prev = values[i-1]
-            curr = values[i]
-            if prev != 0:
-                pct = ((curr - prev) / abs(prev)) * 100
-                symbol = "+" if pct >= 0 else ""
-                growth_texts.append(f"{symbol}{pct:.1f}%")
-            else:
-                growth_texts.append("N/A")
+    # Calculate QoQ Growth and Text Labels
+    final_texts = []
+    
+    if len(y_data) > 0:
+        for i in range(len(y_data)):
+            val = y_data.iloc[i]
+            # Format value: 1,000.1
+            val_str = f"{val:,.1f}"
+            
+            # Calculate Growth
+            growth_str = ""
+            if i > 0:
+                prev = y_data.iloc[i-1]
+                if prev != 0:
+                    pct = ((val - prev) / abs(prev)) * 100
+                    emoji = "🔺" if pct > 0 else "🔻"
+                    growth_str = f"  ({emoji}{pct:.1f}%)"
+                else:
+                    growth_str = "  (-)"
+            
+            final_texts.append(f"{val_str}{growth_str}")
 
     fig = go.Figure(go.Bar(
-        x=dates, 
-        y=values, 
+        x=x_data, 
+        y=y_data, 
         name=title, 
         marker_color=color,
-        text=growth_texts,
+        text=final_texts,
         textposition='outside',
         textfont=dict(size=10),
-        hovertemplate='<b>Date</b>: %{x}<br><b>Value</b>: %{y:.1f}<extra></extra>' # Clean tooltip
+        hovertemplate='<b>Date</b>: %{x}<br><b>Value</b>: %{y:,.1f}<extra></extra>'
     ))
     
     # Increase Y-axis range slightly to fit text
-    max_val = max(values) if len(values) > 0 else 0
-    min_val = min(values) if len(values) > 0 else 0
-    
+    max_val = max(y_data) if len(y_data) > 0 else 0
+    min_val = min(y_data) if len(y_data) > 0 else 0
+
     fig.update_layout(
         title=dict(text=title, font=dict(size=14)),
         margin=dict(l=20, r=20, t=30, b=20),
         height=280, 
-        yaxis=dict(title="", showticklabels=True),
-        yaxis_range=[min_val * 1.1 if min_val < 0 else 0, max_val * 1.25] 
+        yaxis=dict(title="", showticklabels=True, showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+        yaxis_range=[min_val * 1.1 if min_val < 0 else 0, max_val * 1.25],
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(showgrid=False),
+        font=dict(size=10)
     )
     return fig
 
@@ -179,14 +189,29 @@ if get_data_btn:
                     with st.spinner("Generating AI News Summary..."):
                         summary = utils.summarize_news_with_ai(news, api_key)
                         st.markdown(summary)
+                    
+                    st.divider()
+                    st.subheader("🗓️ Major Events Timeline (Past & Future)")
+                    with st.spinner("Identifying Key Events & Catalysts..."):
+                         evt_context = utils.search_key_events(ticker_symbol)
+                         evt_summary = utils.synthesize_key_events(ticker_symbol, evt_context, api_key)
+                         st.markdown(evt_summary)
+                         
                 else:
                     st.warning("⚠️ Enter Gemini API Key in sidebar to unlock AI Summary.")
                 
                 st.divider()
-                st.subheader("Latest Articles")
-                for item in news[:5]: # Show top 5
-                    st.markdown(f"**[{item.get('title')}]({item.get('url')})**")
-                    st.caption(f"{item.get('source')} | {item.get('date')}")
+                st.subheader("Latest Articles (最新文章)")
+                if news:
+                    for item in news[:5]: # Show top 5
+                        title = item.get('title', 'No Title')
+                        url = item.get('url', '#')
+                        source = item.get('source', 'Unknown Source')
+                        date = item.get('date', '')
+                        st.markdown(f"• **[{title}]({url})**")
+                        st.caption(f"{source} | {date}")
+                else:
+                    st.write("No recent articles found.")
 
             # --- Tab 2: Visual Financials ---
             with tab_fin:
@@ -248,12 +273,14 @@ if get_data_btn:
                              capex = pd.Series([0]*num_cols)
 
                         # --- Sankey Diagram (Financial Flow) ---
-                        st.subheader("🌊 Income Statement Flow (Most Recent Quarter)")
                         sankey_data = utils.get_sankey_data(ticker_symbol, financials, segments_json)
                         if sankey_data:
+                            period_label = sankey_data.get('period', 'Most Recent Quarter')
+                            st.subheader(f"🌊 Income Statement Flow ({period_label})")
+                            
                             fig_sankey = go.Figure(data=[go.Sankey(
                                 node = dict(
-                                  pad = 15,
+                                  pad = 30, # Increased padding to reduce blocking
                                   thickness = 20,
                                   line = dict(color = "black", width = 0.5),
                                   label = sankey_data['label'],
@@ -269,35 +296,54 @@ if get_data_btn:
                                   hovertemplate='<b>%{source.label}</b> → <b>%{target.label}</b><br>Value: %{customdata}<extra></extra>'
                                 ))])
                             
-                            fig_sankey.update_layout(title_text=f"{ticker_symbol} Financial Flow (USD)", font_size=10, height=500)
+                            fig_sankey.update_layout(title_text=f"{ticker_symbol} Financial Flow (USD)", font_size=12, height=500)
                             st.plotly_chart(fig_sankey, use_container_width=True)
                         else:
                             st.info("Insufficient data for Sankey Diagram.")
 
                         # --- Separate Compact Charts ---
+                        # --- Separate Compact Charts ---
                         st.subheader("Quarterly Trends (Millions USD)")
                         
-                        # Scale to Millions
-                        rev_m = revenue / 1e6
-                        ebitda_m = ebitda / 1e6
-                        ocf_m = op_cash_flow / 1e6
-                        capex_m = capex / 1e6
+                        # Helper for Robust Plotting
+                        def plot_metric(dates, values, name, color):
+                            try:
+                                # Ensure numeric
+                                values = pd.to_numeric(values, errors='coerce')
+                                # Drop NaNs for plotting check
+                                if values.dropna().empty:
+                                    return None
+                                
+                                # Scale to Millions
+                                values_m = values / 1e6
+                                return create_compact_bar_chart(dates, values_m, f"{name} ($M)", color)
+                            except Exception as e:
+                                return None
 
                         # 1. Revenue
-                        fig_rev = create_compact_bar_chart(dates, rev_m, "Revenue ($M)", '#2E86C1')
-                        st.plotly_chart(fig_rev, use_container_width=True)
+                        fig = plot_metric(dates, revenue, "Revenue", '#2E86C1')
+                        if fig: st.plotly_chart(fig, use_container_width=True)
                         
-                        # 2. EBITDA
-                        fig_ebitda = create_compact_bar_chart(dates, ebitda_m, "EBITDA ($M)", '#28B463')
-                        st.plotly_chart(fig_ebitda, use_container_width=True)
+                        # 2. Gross Profit
+                        # Check availability
+                        gp_series = pd.Series([0]*len(dates))
+                        if 'Gross Profit' in df_inc.index:
+                            gp_series = df_inc.loc['Gross Profit']
+                        
+                        fig = plot_metric(dates, gp_series, "Gross Profit", '#28B463')
+                        if fig: st.plotly_chart(fig, use_container_width=True)
+                        
+                        # 3. EBITDA
+                        fig = plot_metric(dates, ebitda, "EBITDA", '#27AE60')
+                        if fig: st.plotly_chart(fig, use_container_width=True)
 
-                        # 3. Operating Cash Flow
-                        fig_ocf = create_compact_bar_chart(dates, ocf_m, "Operating Cash Flow ($M)", '#F1C40F')
-                        st.plotly_chart(fig_ocf, use_container_width=True)
+                        # 4. Operating Cash Flow
+                        fig = plot_metric(dates, op_cash_flow, "Operating Cash Flow", '#F1C40F')
+                        if fig: st.plotly_chart(fig, use_container_width=True)
                         
-                        # 4. CapEx (New)
-                        fig_capex = create_compact_bar_chart(dates, capex_m, "Capital Expenditure ($M)", '#E74C3C')
-                        st.plotly_chart(fig_capex, use_container_width=True)
+                        # 5. CapEx
+                        fig = plot_metric(dates, capex, "Capital Expenditure", '#E74C3C')
+                        if fig: st.plotly_chart(fig, use_container_width=True)
 
                     except Exception as e:
                         st.error(f"Could not calculate specific metrics: {e}")
@@ -318,8 +364,14 @@ if get_data_btn:
                 st.subheader(f"Competitor Analysis ({ticker_symbol})")
                 
                 if api_key:
-                    # Combine current ticker with competitors
-                    all_tickers = [ticker_symbol] + competitors_list
+                    with st.spinner("Analyzing competitors..."):
+                        competitors_list = utils.synthesize_competitors(ticker_symbol, api_key)
+                        if not competitors_list:
+                            # Fallback defaults if AI fails
+                            competitors_list = ['MSFT', 'GOOG', 'AMZN'] if ticker_symbol == 'NVDA' else ['AAPL', 'MSFT', 'GOOG']
+                        
+                        # Combine current ticker with competitors
+                        all_tickers = [ticker_symbol] + competitors_list
                     
                     # 1. Metrics Table
                     st.caption("Key Valuation & Performance Metrics")
