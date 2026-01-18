@@ -1,0 +1,22 @@
+[
+    {
+        "id": "d5779964-274d-48ba-9f95-f546d78058e6",
+        "ticker": "META",
+        "thesis_statement": "Meta will successfully transition from a Metaverse-first to an AI-first growth model, utilizing AI-enhanced ad-targeting (Llama-driven) to maintain superior monetization rates that more than offset the high capital expenditures required for its infrastructure build-out.",
+        "falsification_condition": "The thesis is proven false if Meta's GAAP Operating Margin falls below 32% for two consecutive quarters, or if Year-over-Year (YoY) Ad Revenue growth decelerates to single digits (under 10%) while AI-related Capex continues to increase.",
+        "time_horizon": "3-6 Months",
+        "confidence": 8,
+        "status": "Active",
+        "created_at": "2026-01-18 17:13:50"
+    },
+    {
+        "id": "dc43b157-48cb-435a-8705-095969f7f27c",
+        "ticker": "HOOD",
+        "thesis_statement": "Robinhood (HOOD) will successfully pivot from a discount brokerage to a dominant retail 'Financial Super-App' by capturing the 10x growth trajectory of prediction markets and the 2026 IPO resurgence, effectively offsetting current legislative headwinds in the crypto sector.",
+        "falsification_condition": "Quarterly 'Other Revenues' (encompassing prediction markets) fails to grow by at least 50% year-over-year by Q4 2025, OR Robinhood's share of US retail crypto volume drops below 10% for two consecutive quarters due to the continued stalling of the CLARITY Act.",
+        "time_horizon": "3-6 Months",
+        "confidence": 4,
+        "status": "Active",
+        "created_at": "2026-01-18 21:14:23"
+    }
+]

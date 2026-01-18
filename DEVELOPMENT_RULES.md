@@ -27,6 +27,7 @@ This document serves as a living record of development standards and "lessons le
     *   **Explicitly Forbidden**: Random/detached asterisks (`**` in the middle of sentences).
     *   **Spacing**: Explicitly instruct the model to "Ensure proper spacing between words" (prevents "The300Billion" issues).
     *   **Style**: "Smooth narrative flow" > "Forced number insertion".
+    *   **LaTeX Ban**: **Do NOT use LaTeX math mode ($...$)**. Streamlit renders this by removing spaces. Usage of `$` must *only* be for currency (e.g., "$50M"), never closing with another `$`.
 
 *   **Specificity & Factuality**:
     *   **Rule**: Do not ask generic questions ("How is the financial health?").

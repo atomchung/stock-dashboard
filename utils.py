@@ -6,6 +6,7 @@ import json
 
 import google.generativeai as genai
 import os
+import requests
 
 def get_stock_data(ticker_symbol):
     """
@@ -59,7 +60,15 @@ def summarize_news_with_ai(news_items, api_key):
         Then, list the top 3 most important articles from the provided list. For each, strictly format it as:
         - **[Title]**: Why it's worth reading.
         
-        **IMPORTANT**: Ensure there are spaces between words. Do not use random `**` in the middle of sentences.
+        **Formatting Rules (CRITICAL)**:
+        - **NO LaTeX**: Do NOT use `$` signs to wrap sentences (e.g. `$Text$`). This causes spaces to disappear.
+        - **Currency**: Write "$27.5 billion" or "27.5 billion USD". NEVER close the standard with another `$`.
+        - **Markdown Only**: Use `**bold**` for emphasis. Do not use random `**` in sentences.
+
+        **Entity Verification**:
+        - Focus ONLY on news directly related to the specific company. 
+        - If an article discusses a competitor (e.g. Nvidia) but only mentions this stock in passing, IGNORE it or explicitly state "In contrast to Nvidia...".
+        - Do not halluncinate a connection if the article is purely about another stock.
 
         News Items:
         {news_text}
@@ -302,10 +311,11 @@ def synthesize_core_focus(ticker, context_results, api_key):
         2. **🐻 Bear Case (Pessimistic)**: Main risk. Support with valuation concerns or margin compression facts.
         3. **🔑 Key Variance**: Where do bulls and bears disagree?
 
-        **Formatting Checks**:
-        - Ensure proper spacing between words (e.g., "The 300 Billion" not "The300Billion").
-        - Do not use `**` inside the narrative paragraphs.
-        
+        **Formatting Rules (CRITICAL)**:
+        - **NO LaTeX**: Do NOT use `$` signs to wrap sentences or numbers (e.g. `$27.5M profit$`). This destroys spacing.
+        - **Currency**: Write "$27.5 billion" or "27.5 billion USD".
+        - **Spaces**: Ensure proper spacing between words (e.g., "The 300 Billion" not "The300Billion").
+
         Context:
         {context_text}
         
@@ -370,10 +380,11 @@ def synthesize_key_events(ticker, context_results, api_key):
         **🔮 Upcoming Catalysts (Next 3 Months)**:
         * **[Est. Date] - [Event]**: [Why it matters]
 
-        **IMPORTANT**: 
-        - Ensure proper spacing (e.g. "The 300 Billion" NOT "The300Billion").
-        - Do not generate texts like "The 300BillionOpenAIContract **". format strictly as "**Date - Event**: Description".
-        
+        **Formatting Rules (CRITICAL)**:
+        - **NO LaTeX**: Do NOT use `$` to wrap text. 
+        - **Currency**: Correct: "$5 Million". Incorrect: "$5 Million$".
+        - **Markdown**: Use `**bold**` only for headers/dates.
+
         If no upcoming events are found, explicit state "No major confirmed upcoming events found."
         
         Context:
@@ -423,10 +434,12 @@ def synthesize_financial_changes(ticker, context_results, api_key):
         - At what price/interest rate? (e.g. converted at $12.50, or 5% coupon)
         - With whom? (if mentioned)
 
-        **Formatting Rules**:
-        - Use normal text, minimal bolding. 
-        - **AVOID** detached `**` characters.
-        - Ensure spaces between words.
+        - With whom? (if mentioned)
+
+        **Formatting Rules (CRITICAL)**:
+        - **NO LaTeX**: Do NOT use `$` signs to wrap sentences.
+        - **Currency**: Direct format: "$500M" or "500 million USD".
+        - **Validation**: Check that spaces exist between all words.
         
         Output format:
         **Revenue Drivers**:
@@ -785,6 +798,85 @@ def get_historical_data(ticker, period="1y"):
         return df
     except Exception as e:
         print(f"Error fetching history: {e}")
+
+def generate_falsifiable_thesis(ticker, context_text, api_key):
+    """
+    Generates a draft falsifiable thesis based on provided context.
+    """
+    if not api_key:
+        return None
+    
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-3-flash-preview')
+        
+        prompt = f"""
+        You are a disciplined investment strategist who believes in Karl Popper's "Falsifiability".
+        
+        Based on the following context for {ticker}, generate a DRAFT Investment Thesis.
+        
+        Context:
+        {context_text[:10000]} # Limit context
+        
+        **Your Goal**:
+        Create a thesis that is **NOT** just "it will go up". It must be a specific hypothesis with a "Kill Switch".
+        
+        **Output Format (JSON only)**:
+        {{
+            "thesis_statement": "The core argument (e.g. 'Cloud revenue will accelerate due to AI adoption').",
+            "falsification_condition": "Specific, measurable event/metric that proves you WRONG (e.g. 'Cloud growth slows below 15% for 2 quarters').",
+            "time_horizon": "e.g. 6-12 Months",
+            "confidence": 7
+        }}
+        
+        Rules:
+        - "falsification_condition" MUST be specific (numbers, specific events), not vague "if bad things happen".
+        - Returns ONLY valid JSON.
+        """
+        
+        response = model.generate_content(prompt)
+        text = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        return data
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+def refine_thesis_text(current_text, current_condition, instruction, api_key):
+    """
+    Refines the thesis text based on user instruction.
+    """
+    if not api_key:
+        return current_text, current_condition
+        
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-3-flash-preview')
+        
+        prompt = f"""
+        You are an editor for an investment journal.
+        
+        Current Thesis: "{current_text}"
+        Current Kill Switch: "{current_condition}"
+        
+        User Instruction: "{instruction}" (e.g. "Make it more professional", "Focus more on margins", "Translate to Chinese")
+        
+        Refine the Thesis and Kill Switch based on the instruction. Keep the core logic unless asked to change it.
+        
+        Output (JSON):
+        {{
+            "thesis_statement": "...",
+            "falsification_condition": "..."
+        }}
+        """
+        
+        response = model.generate_content(prompt)
+        text = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        return data.get("thesis_statement", current_text), data.get("falsification_condition", current_condition)
+        
+    except Exception as e:
+        return current_text, current_condition
         return pd.DataFrame()
 
 def calculate_momentum(df):
@@ -831,3 +923,134 @@ def analyze_investment_signals(info, df):
         signals.append("📉 **Bearish Trend**: Price is below the 50-day SMA.")
 
     return signals
+
+    return signals
+
+def get_company_branding_keywords(ticker, api_key):
+    """
+    Uses AI to identify the Company Name and Top 3 Famous Products.
+    Returns a list of keywords for filtering.
+    """
+    if not api_key:
+        return []
+    
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-3-flash-preview')
+        
+        prompt = f"""
+        Analyze the stock ticker: {ticker}.
+        Identify:
+        1. Parent Company Name (e.g. Alphabet Inc.)
+        2. Common Colloquial Name (e.g. Google)
+        3. Sibling/Dual-Class Tickers (e.g. if GOOG, return GOOGL too).
+        4. Top 3 Famous Products (e.g. iPhone, YouTube, Search).
+
+        Return ONLY a comma-separated list of these keywords.
+        Example for GOOG: Alphabet, Google, GOOGL, YouTube, Cloud
+        """
+        
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        keywords = [k.strip() for k in text.split(',') if k.strip()]
+        return keywords
+    except Exception as e:
+        print(f"Error getting branding keywords: {e}")
+        return []
+
+def get_polymarket_data(ticker_symbol, company_name=None, extra_keywords=None):
+    """
+    Fetches top betting markets from Polymarket related to the ticker.
+    Returns Top 5 by volume.
+    
+    Strictly filters results to contain Ticker, Company Name, or Extra Keywords.
+    """
+    try:
+        seen_slugs = set()
+        all_markets = []
+
+        # Prepare Filter List (Case-Insensitive)
+        filter_terms = {ticker_symbol.lower()}
+        if company_name:
+            # Add "Apple" from "Apple Inc."
+            simple = company_name.split()[0].lower()
+            filter_terms.add(simple)
+
+        if extra_keywords:
+            for k in extra_keywords:
+                filter_terms.add(k.lower())
+
+        def fetch_and_parse(query_term):
+            url = "https://gamma-api.polymarket.com/events"
+            params = {
+                "question": query_term,
+                "limit": 20,
+                "closed": "false"
+            }
+            try:
+                r = requests.get(url, params=params)
+                if r.status_code == 200:
+                    return r.json()
+            except:
+                pass
+            return []
+
+        # 1. Search by Ticker
+        events_ticker = fetch_and_parse(ticker_symbol)
+        
+        # 2. Search by simple Company Name
+        events_name = []
+        if company_name:
+            simple_name = company_name.split()[0]
+            if simple_name.lower() != ticker_symbol.lower():
+                events_name = fetch_and_parse(simple_name)
+
+        # Combine & Strict Filter
+        for event in events_ticker + events_name:
+            slug = event.get('slug')
+            if slug in seen_slugs:
+                continue
+            seen_slugs.add(slug)
+            
+            markets = event.get('markets', [])
+            if not markets: continue
+            mk = markets[0]
+            
+            title = event.get('title', mk.get('question'))
+            
+            # --- STRICT FILTERING ---
+            # Title must contain at least one filter term
+            title_lower = title.lower()
+            if not any(term in title_lower for term in filter_terms):
+                continue
+            # ------------------------
+
+            volume = float(mk.get('volume', 0))
+            
+            # Extract Odds
+            try:
+                outcomes = json.loads(mk.get('outcomes', '[]'))
+                prices = json.loads(mk.get('outcomePrices', '[]'))
+                odds_str = []
+                for out, price in zip(outcomes, prices):
+                    p = float(price) * 100
+                    odds_str.append(f"{out}: {p:.1f}%")
+                odds_display = ", ".join(odds_str)
+            except:
+                odds_display = "Odds unavailable"
+            
+            all_markets.append({
+                "title": title,
+                "volume": volume,
+                "odds": odds_display,
+                "url": f"https://polymarket.com/event/{slug}"
+            })
+            
+        # Client-side Sort
+        all_markets.sort(key=lambda x: x['volume'], reverse=True)
+        
+        return all_markets[:5]
+        
+    except Exception as e:
+        print(f"Error fetching Polymarket data: {e}")
+        return []
