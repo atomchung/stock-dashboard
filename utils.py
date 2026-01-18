@@ -981,16 +981,22 @@ def get_polymarket_data(ticker_symbol, company_name=None, extra_keywords=None):
                 filter_terms.add(k.lower())
 
         def fetch_and_parse(query_term):
-            url = "https://gamma-api.polymarket.com/events"
+            url = "https://gamma-api.polymarket.com/public-search"
             params = {
-                "question": query_term,
+                "q": query_term,
                 "limit": 20,
+                "type": "event",
                 "closed": "false"
             }
             try:
                 r = requests.get(url, params=params)
                 if r.status_code == 200:
-                    return r.json()
+                    data = r.json()
+                    # /public-search returns {'events': [...]}
+                    if isinstance(data, dict):
+                        return data.get('events', [])
+                    elif isinstance(data, list):
+                        return data
             except:
                 pass
             return []
