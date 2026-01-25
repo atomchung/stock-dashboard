@@ -1,0 +1,401 @@
+{
+  "ONDS": {
+    "structure": {
+      "nodes": [
+        {
+          "name": "Total Revenue",
+          "layer": 0
+        },
+        {
+          "name": "Cost of Revenue",
+          "layer": 1
+        },
+        {
+          "name": "Gross Profit",
+          "layer": 1
+        },
+        {
+          "name": "Research and Development",
+          "layer": 2
+        },
+        {
+          "name": "Selling General and Administration",
+          "layer": 2
+        },
+        {
+          "name": "Operating Income",
+          "layer": 2
+        },
+        {
+          "name": "Other Income Expense",
+          "layer": 2
+        },
+        {
+          "name": "Net Interest Income",
+          "layer": 2
+        },
+        {
+          "name": "Tax Provision",
+          "layer": 3
+        },
+        {
+          "name": "Net Income",
+          "layer": 3
+        }
+      ],
+      "links": [
+        {
+          "source": "Total Revenue",
+          "target": "Cost of Revenue",
+          "field": "Cost Of Revenue"
+        },
+        {
+          "source": "Total Revenue",
+          "target": "Gross Profit",
+          "field": "Gross Profit"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Research and Development",
+          "field": "Research And Development"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Selling General and Administration",
+          "field": "Selling General And Administration"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Operating Income",
+          "field": "Operating Income"
+        },
+        {
+          "source": "Operating Income",
+          "target": "Net Income",
+          "field": "Operating Income"
+        },
+        {
+          "source": "Other Income Expense",
+          "target": "Net Income",
+          "field": "Other Income Expense"
+        },
+        {
+          "source": "Net Interest Income",
+          "target": "Net Income",
+          "field": "Net Interest Income"
+        },
+        {
+          "source": "Net Income",
+          "target": "Tax Provision",
+          "field": "Tax Provision"
+        }
+      ],
+      "field_mapping": {
+        "Total Revenue": "Total Revenue",
+        "Cost of Revenue": "Cost Of Revenue",
+        "Gross Profit": "Gross Profit",
+        "Research and Development": "Research And Development",
+        "Selling General and Administration": "Selling General And Administration",
+        "Operating Income": "Operating Income",
+        "Other Income Expense": "Other Income Expense",
+        "Net Interest Income": "Net Interest Income",
+        "Tax Provision": "Tax Provision",
+        "Net Income": "Net Income"
+      }
+    },
+    "cached_at": "2026-01-25 17:15:48"
+  },
+  "MSTR": {
+    "structure": {
+      "nodes": [
+        {
+          "name": "Total Revenue",
+          "layer": 0
+        },
+        {
+          "name": "Other Income",
+          "layer": 0
+        },
+        {
+          "name": "Cost of Revenue",
+          "layer": 1
+        },
+        {
+          "name": "Gross Profit",
+          "layer": 1
+        },
+        {
+          "name": "Operating Expense",
+          "layer": 2
+        },
+        {
+          "name": "Interest Expense",
+          "layer": 2
+        },
+        {
+          "name": "Pretax Income",
+          "layer": 2
+        },
+        {
+          "name": "Tax Provision",
+          "layer": 3
+        },
+        {
+          "name": "Net Income",
+          "layer": 3
+        }
+      ],
+      "links": [
+        {
+          "source": "Total Revenue",
+          "target": "Cost of Revenue",
+          "field": "Cost Of Revenue"
+        },
+        {
+          "source": "Total Revenue",
+          "target": "Gross Profit",
+          "field": "Gross Profit"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Operating Expense",
+          "field": "Operating Expense"
+        },
+        {
+          "source": "Other Income",
+          "target": "Interest Expense",
+          "field": "Interest Expense"
+        },
+        {
+          "source": "Other Income",
+          "target": "Pretax Income",
+          "field": "Pretax Income"
+        },
+        {
+          "source": "Pretax Income",
+          "target": "Tax Provision",
+          "field": "Tax Provision"
+        },
+        {
+          "source": "Pretax Income",
+          "target": "Net Income",
+          "field": "Net Income"
+        }
+      ],
+      "field_mapping": {
+        "Total Revenue": "Total Revenue",
+        "Other Income": "Other Income Expense",
+        "Cost of Revenue": "Cost Of Revenue",
+        "Gross Profit": "Gross Profit",
+        "Operating Expense": "Operating Expense",
+        "Interest Expense": "Interest Expense",
+        "Pretax Income": "Pretax Income",
+        "Tax Provision": "Tax Provision",
+        "Net Income": "Net Income"
+      }
+    },
+    "cached_at": "2026-01-25 17:40:02"
+  },
+  "EOSE": {
+    "structure": {
+      "nodes": [
+        {
+          "name": "Total Revenue",
+          "layer": 0
+        },
+        {
+          "name": "Cost of Revenue",
+          "layer": 1
+        },
+        {
+          "name": "Gross Profit",
+          "layer": 1
+        },
+        {
+          "name": "Research And Development",
+          "layer": 2
+        },
+        {
+          "name": "Selling General And Administration",
+          "layer": 2
+        },
+        {
+          "name": "Operating Income",
+          "layer": 2
+        },
+        {
+          "name": "Other Income Expense",
+          "layer": 2
+        },
+        {
+          "name": "Net Interest Income",
+          "layer": 2
+        },
+        {
+          "name": "Net Income",
+          "layer": 3
+        }
+      ],
+      "links": [
+        {
+          "source": "Total Revenue",
+          "target": "Cost of Revenue",
+          "field": "Cost Of Revenue"
+        },
+        {
+          "source": "Total Revenue",
+          "target": "Gross Profit",
+          "field": "Gross Profit"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Research And Development",
+          "field": "Research And Development"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Selling General And Administration",
+          "field": "Selling General And Administration"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Operating Income",
+          "field": "Operating Income"
+        },
+        {
+          "source": "Operating Income",
+          "target": "Net Income",
+          "field": "Operating Income"
+        },
+        {
+          "source": "Other Income Expense",
+          "target": "Net Income",
+          "field": "Other Income Expense"
+        },
+        {
+          "source": "Net Interest Income",
+          "target": "Net Income",
+          "field": "Net Interest Income"
+        }
+      ],
+      "field_mapping": {
+        "Total Revenue": "Total Revenue",
+        "Cost of Revenue": "Cost Of Revenue",
+        "Gross Profit": "Gross Profit",
+        "Research And Development": "Research And Development",
+        "Selling General And Administration": "Selling General And Administration",
+        "Operating Income": "Operating Income",
+        "Other Income Expense": "Other Income Expense",
+        "Net Interest Income": "Net Interest Income",
+        "Net Income": "Net Income"
+      }
+    },
+    "cached_at": "2026-01-25 17:48:25"
+  },
+  "CAVA": {
+    "structure": {
+      "nodes": [
+        {
+          "name": "Total Revenue",
+          "layer": 0
+        },
+        {
+          "name": "Net Interest Income",
+          "layer": 0
+        },
+        {
+          "name": "Cost of Revenue",
+          "layer": 1
+        },
+        {
+          "name": "Gross Profit",
+          "layer": 1
+        },
+        {
+          "name": "Operating Expense",
+          "layer": 2
+        },
+        {
+          "name": "Operating Income",
+          "layer": 2
+        },
+        {
+          "name": "Pretax Income",
+          "layer": 2
+        },
+        {
+          "name": "Tax Provision",
+          "layer": 3
+        },
+        {
+          "name": "Net Income",
+          "layer": 3
+        },
+        {
+          "name": "Other Income Expense",
+          "layer": 3
+        }
+      ],
+      "links": [
+        {
+          "source": "Total Revenue",
+          "target": "Cost of Revenue",
+          "field": "Cost Of Revenue"
+        },
+        {
+          "source": "Total Revenue",
+          "target": "Gross Profit",
+          "field": "Gross Profit"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Operating Expense",
+          "field": "Operating Expense"
+        },
+        {
+          "source": "Gross Profit",
+          "target": "Operating Income",
+          "field": "Operating Income"
+        },
+        {
+          "source": "Operating Income",
+          "target": "Pretax Income",
+          "field": "Operating Income"
+        },
+        {
+          "source": "Net Interest Income",
+          "target": "Pretax Income",
+          "field": "Net Interest Income"
+        },
+        {
+          "source": "Pretax Income",
+          "target": "Tax Provision",
+          "field": "Tax Provision"
+        },
+        {
+          "source": "Pretax Income",
+          "target": "Net Income",
+          "field": "Net Income"
+        },
+        {
+          "source": "Pretax Income",
+          "target": "Other Income Expense",
+          "field": "Other Income Expense"
+        }
+      ],
+      "field_mapping": {
+        "Total Revenue": "Total Revenue",
+        "Net Interest Income": "Net Interest Income",
+        "Cost of Revenue": "Cost Of Revenue",
+        "Gross Profit": "Gross Profit",
+        "Operating Expense": "Operating Expense",
+        "Operating Income": "Operating Income",
+        "Pretax Income": "Pretax Income",
+        "Tax Provision": "Tax Provision",
+        "Net Income": "Net Income",
+        "Other Income Expense": "Other Income Expense"
+      }
+    },
+    "cached_at": "2026-01-25 20:54:20"
+  }
+}

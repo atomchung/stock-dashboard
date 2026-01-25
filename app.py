@@ -8,6 +8,8 @@ import theses_manager
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from agent import StockAgent
+
 
 # Load env vars
 load_dotenv()
@@ -74,7 +76,7 @@ def render_dashboard(api_key, ticker_symbol):
 
     # Clear cache if ticker changes
     if ticker_symbol != st.session_state['last_ticker'] and ticker_symbol:
-         keys_to_clear = ['news', 'earnings_context', 'evt_context', 'data_loaded', 'ticker_obj', 'info', 'financials', 'history_df', 'signals']
+         keys_to_clear = ['news', 'earnings_context', 'evt_context', 'data_loaded', 'ticker_obj', 'info', 'financials', 'history_df', 'signals', 'competitors_list', 'news_summary', 'strategy_summary', 'evt_summary', 'fin_summary']
          for k in keys_to_clear:
              if k in st.session_state:
                  del st.session_state[k]
@@ -108,10 +110,14 @@ def render_dashboard(api_key, ticker_symbol):
                 st.session_state['core_driver'] = "N/A"
                 
                 if api_key:
+                    agent = StockAgent(api_key, ticker_symbol)
+                    # st.session_state['agent'] removed to prevent pickling error
+                    
                     with st.spinner("Extracting Revenue Segments & Drivers..."):
                         seg_context = utils.search_revenue_segments(ticker_symbol)
-                        st.session_state['segments_json'] = utils.synthesize_revenue_segments(ticker_symbol, seg_context, api_key)
-                        st.session_state['core_driver'] = utils.synthesize_core_driver(ticker_symbol, st.session_state['news'], api_key)
+                        st.session_state['segments_json'] = agent.extract_revenue_segments(seg_context)
+                        st.session_state['core_driver'] = agent.identify_core_driver(st.session_state['news'])
+
                 
                 st.session_state['data_loaded'] = True
                 st.session_state['current_ticker'] = ticker_symbol
@@ -182,9 +188,14 @@ def render_dashboard(api_key, ticker_symbol):
             st.divider()
             st.subheader("🧠 Core Strategic Focus (Bull vs Bear)")
             if 'strategy_summary' not in st.session_state:
+                 agent = StockAgent(api_key, ticker_symbol)
                  with st.spinner("Synthesizing Strategy (Bull/Bear)..."):
                      context = utils.search_earnings_context(ticker_symbol)
-                     st.session_state['strategy_summary'] = utils.synthesize_core_focus(ticker_symbol, context, api_key)
+                     # Pass company info and news for better context
+                     company_info = st.session_state.get('info', {})
+                     news_context = st.session_state.get('news', [])
+                     st.session_state['strategy_summary'] = agent.analyze_strategy(context, news_context, company_info)
+
             st.markdown(st.session_state['strategy_summary'])
 
         st.divider()
@@ -195,8 +206,9 @@ def render_dashboard(api_key, ticker_symbol):
             if api_key:
                 st.subheader("🤖 AI Executive Summary")
                 with st.spinner("Generating AI News Summary..."):
+                    agent = StockAgent(api_key, ticker_symbol)
                     if 'news_summary' not in st.session_state:
-                         st.session_state['news_summary'] = utils.summarize_news_with_ai(news, api_key)
+                         st.session_state['news_summary'] = agent.analyze_news(news)
                     st.markdown(st.session_state['news_summary'])
                 
                 st.divider()
@@ -204,8 +216,9 @@ def render_dashboard(api_key, ticker_symbol):
                 with st.spinner("Identifying Key Events & Catalysts..."):
                      if 'evt_summary' not in st.session_state:
                           evt_context = utils.search_key_events(ticker_symbol)
-                          st.session_state['evt_summary'] = utils.synthesize_key_events(ticker_symbol, evt_context, api_key)
+                          st.session_state['evt_summary'] = agent.analyze_events(evt_context)
                      st.markdown(st.session_state['evt_summary'])
+
                      
             else:
                 st.warning("⚠️ Enter Gemini API Key in sidebar to unlock AI Summary.")
@@ -215,9 +228,11 @@ def render_dashboard(api_key, ticker_symbol):
             with st.spinner("Fetching Betting Markets..."):
                 extra_kws = []
                 if api_key:
-                    extra_kws = utils.get_company_branding_keywords(ticker_symbol, api_key)
+                    agent = StockAgent(api_key, ticker_symbol)
+                    extra_kws = agent.get_branding_keywords()
                 
                 poly_markets = utils.get_polymarket_data(ticker_symbol, info.get('shortName'), extra_kws)
+
                 
                 if poly_markets:
                     for m in poly_markets:
@@ -292,7 +307,8 @@ def render_dashboard(api_key, ticker_symbol):
                             op_cash_flow = pd.Series([0]*num_cols)
                             capex = pd.Series([0]*num_cols)
 
-                    sankey_data = utils.get_sankey_data(ticker_symbol, financials, segments_json)
+                    agent = StockAgent(api_key, ticker_symbol) if api_key else None
+                    sankey_data = utils.get_sankey_data(ticker_symbol, financials, segments_json, agent=agent)
                     if sankey_data:
                         period_label = sankey_data.get('period', 'Most Recent Quarter')
                         st.subheader(f"🌊 Income Statement Flow ({period_label})")
@@ -359,9 +375,11 @@ def render_dashboard(api_key, ticker_symbol):
                 st.divider()
                 st.subheader("📉 Financial Performance Deep Dive (AI)")
                 with st.spinner("Analyzing financial drivers..."):
+                    agent = StockAgent(api_key, ticker_symbol)
                     if 'fin_summary' not in st.session_state:
                          fin_context = utils.search_financial_analysis(ticker_symbol)
-                         st.session_state['fin_summary'] = utils.synthesize_financial_changes(ticker_symbol, fin_context, api_key)
+                         st.session_state['fin_summary'] = agent.analyze_financials(fin_context)
+
                     st.markdown(st.session_state['fin_summary'])
         
         with tab_comp:
@@ -369,14 +387,19 @@ def render_dashboard(api_key, ticker_symbol):
             
             if api_key:
                 with st.spinner("Analyzing competitors..."):
+                    agent = StockAgent(api_key, ticker_symbol)
                     if 'competitors_list' not in st.session_state:
-                         st.session_state['competitors_list'] = utils.synthesize_competitors(ticker_symbol, api_key)
+                         st.session_state['competitors_list'] = agent.identify_competitors()
+
                     
                     comp_list = st.session_state['competitors_list']
-                    if not comp_list:
-                        comp_list = ['MSFT', 'GOOG', 'AMZN'] if ticker_symbol == 'NVDA' else ['AAPL', 'MSFT', 'GOOG']
                     
-                    all_tickers = [ticker_symbol] + comp_list
+                    if not comp_list:
+                        st.warning(f"⚠️ Could not identify relevant industry peers for {ticker_symbol}. This may be a niche company with few public competitors.")
+                        # Only show the target stock itself
+                        all_tickers = [ticker_symbol]
+                    else:
+                        all_tickers = [ticker_symbol] + comp_list
                 
                 st.caption("Key Valuation & Performance Metrics")
                 comp_df = utils.get_competitor_data(all_tickers)
@@ -447,12 +470,15 @@ def render_dashboard(api_key, ticker_symbol):
                                  if 'news_summary' in st.session_state:
                                      ctx += f"News Summary: {st.session_state['news_summary']}\n"
                                  else:
-                                     ctx += f"News Summary: {utils.summarize_news_with_ai(news, api_key)}\n"
+                                     agent = StockAgent(api_key, ticker_symbol)
+                                     ctx += f"News Summary: {agent.analyze_news(news)}\n"
                              
                              if user_keywords:
                                  ctx += f"\nUser Focus/Keywords: {user_keywords}\n"
                                  
-                             generated = utils.generate_falsifiable_thesis(ticker_symbol, ctx, api_key)
+                             agent = StockAgent(api_key, ticker_symbol)
+                             generated = agent.generate_thesis(ctx, user_keywords)
+
                              
                              if generated and "error" not in generated:
                                 st.session_state["draft_fn_statement"] = generated.get("thesis_statement", "")

@@ -8,3 +8,7 @@ plotly
 python-dotenv
 watchdog
 requests
+
+# OpenBB
+openbb-core
+openbb-yfinance

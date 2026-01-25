@@ -1,253 +1,28 @@
 import yfinance as yf
 import pandas as pd
 import ta
-from duckduckgo_search import DDGS
+from duckduckgo_search import DDGS # Restored for Deep Search
+import obb_utils
 import json
 
-import google.generativeai as genai
+# import google.generativeai as genai # Deprecated: Moved to agent.py (Removed)
 import os
 import requests
 
+
 def get_stock_data(ticker_symbol):
     """
-    Fetches the yfinance Ticker object and basic info.
+    Fetches the yfinance Ticker object and basic info using OpenBB/Fallback.
     """
-    try:
-        ticker = yf.Ticker(ticker_symbol)
-        # Force a data fetch to check if valid
-        _ = ticker.history(period="1d")
-        if _.empty:
-            return None, "No data found for symbol"
-        return ticker, None
-    except Exception as e:
-        return None, str(e)
+    return obb_utils.get_stock_data(ticker_symbol)
 
 def get_news(ticker_symbol):
     """
-    Returns a list of news items using DuckDuckGo.
+    Returns a list of news items using OpenBB with DDG fallback.
     """
-    try:
-        # Try specific query first (Past Year)
-        results = DDGS().news(keywords=f"{ticker_symbol} stock", region="us-en", safesearch="off", timelimit="y", max_results=10)
-        # Fallback
-        if not results:
-            results = DDGS().news(keywords=f"{ticker_symbol} news", region="us-en", safesearch="off", timelimit="y", max_results=10)
-        return results
-    except Exception as e:
-        print(f"Error fetching news: {e}")
-        return []
+    return obb_utils.get_news(ticker_symbol)
 
-def summarize_news_with_ai(news_items, api_key):
-    """
-    Summarizes news using Gemini API.
-    """
-    if not api_key:
-        return "Please provide a gemini API Key to see the summary."
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
 
-        
-        # Prepare content
-        news_text = ""
-        for i, item in enumerate(news_items[:7]): # Limit to 7 items
-            news_text += f"{i+1}. {item.get('title')} ({item.get('source')}) - {item.get('body')}\n"
-            
-        prompt = f"""
-        You are a financial analyst. Based on the following recent news titles and snippets, provide a concise summary of what is driving the stock's sentiment.
-        
-        Then, list the top 3 most important articles from the provided list. For each, strictly format it as:
-        - **[Title]**: Why it's worth reading.
-        
-        **Formatting Rules (CRITICAL)**:
-        - **NO LaTeX**: Do NOT use `$` signs to wrap sentences (e.g. `$Text$`). This causes spaces to disappear.
-        - **Currency**: Write "$27.5 billion" or "27.5 billion USD". NEVER close the standard with another `$`.
-        - **Markdown Only**: Use `**bold**` for emphasis. Do not use random `**` in sentences.
-
-        **Entity Verification**:
-        - Focus ONLY on news directly related to the specific company. 
-        - If an article discusses a competitor (e.g. Nvidia) but only mentions this stock in passing, IGNORE it or explicitly state "In contrast to Nvidia...".
-        - Do not halluncinate a connection if the article is purely about another stock.
-
-        News Items:
-        {news_text}
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error gathering AI summary: {e}. (Ensure API Key is valid and supports 'gemini-2.0-flash-exp')"
-
-def format_large_number(num):
-    """
-    Formats a large number into readable string with suffix (T, B, M, K).
-    """
-    if not num or isinstance(num, str):
-        return str(num)
-    
-    try:
-        num = float(num)
-        if num >= 1e12:
-            return f"${num/1e12:.2f}T"
-        elif num >= 1e9:
-            return f"${num/1e9:.2f}B"
-        elif num >= 1e6:
-            return f"${num/1e6:.2f}M"
-        elif num >= 1e3:
-            return f"${num/1e3:.2f}K"
-        else:
-            return f"${num:.2f}"
-    except:
-        return str(num)
-
-def get_sankey_data(ticker_symbol, financials, segments_json):
-    """
-    Prepares node/link data for an Income Statement Sankey Diagram.
-    Style: App Economy (Blue Revenue, Green Profit, Red Costs).
-    """
-    try:
-        inc = financials.get('income_stmt', pd.DataFrame())
-        if inc.empty:
-            return None
-        
-        # Get most recent quarter
-        col = inc.columns[0]
-        recent = inc[col]
-
-        # Extract Core Values (Absolute positives)
-        total_rev = abs(recent.get('Total Revenue', 0))
-        cogs = abs(recent.get('Cost Of Revenue', 0))
-        gross_profit = abs(recent.get('Gross Profit', 0))
-        
-        # OpEx Breakdown
-        op_expense = abs(recent.get('Operating Expense', 0)) 
-        rd = abs(recent.get('Research And Development', 0))
-         # Fallback if specific lines missing
-        if rd == 0:
-             rd = 0
-             
-        sga = abs(recent.get('Selling General And Administration', 0))
-        
-        op_income = abs(recent.get('Operating Income', 0))
-        
-        tax = abs(recent.get('Tax Provision', 0))
-        net_income = abs(recent.get('Net Income', 0))
-        
-        # Colors
-        COLOR_REV = "#2E86C1" # Blue
-        COLOR_COST = "#E74C3C" # Red
-        COLOR_GP = "#28B463" # Green
-        COLOR_OPEX = "#F39C12" # Orange
-        COLOR_NET = "#1E8449" # Dark Green
-        COLOR_GREY = "#95A5A6"
-        
-        # --- Nodes ---
-        labels = []
-        node_colors = []
-        
-        source = []
-        target = []
-        value = []
-        link_colors = []
-        custom_data = [] # For tooltip strings
-        
-        # Helper to get index
-        def get_idx(name, color):
-            if name not in labels:
-                labels.append(name)
-                node_colors.append(color)
-            return labels.index(name)
-
-        # Helper to add link
-        def add_link(src_name, src_color, tgt_name, tgt_color, val, link_color=None):
-            if val <= 0: return
-            s = get_idx(src_name, src_color)
-            t = get_idx(tgt_name, tgt_color)
-            source.append(s)
-            target.append(t)
-            value.append(val)
-            link_colors.append(link_color if link_color else "rgba(180, 180, 180, 0.5)")
-            
-            # Format value for tooltip (B or M)
-            fmt_val = format_large_number(val)
-            custom_data.append(fmt_val)
-
-        # 1. Segments -> Revenue
-        segments_total = 0
-        try:
-            segs = json.loads(segments_json)
-            if segs:
-                for s in segs:
-                    val = float(s['value']) * 1e9 
-                    add_link(f"{s['label']}", "#5DADE2", "Total Revenue", COLOR_REV, val, "rgba(93, 173, 226, 0.3)")
-                    segments_total += val
-        except:
-            pass
-            
-        # 2. Revenue -> COGS & Gross Profit
-        add_link("Total Revenue", COLOR_REV, "Cost of Revenue", COLOR_COST, cogs, "rgba(231, 76, 60, 0.3)")
-        add_link("Total Revenue", COLOR_REV, "Gross Profit", COLOR_GP, gross_profit, "rgba(40, 180, 99, 0.3)")
-        
-        # 3. Gross Profit -> OpEx & Op Income
-        if rd > 0:
-            add_link("Gross Profit", COLOR_GP, "R&D", COLOR_OPEX, rd, "rgba(243, 156, 18, 0.3)")
-        if sga > 0:
-            add_link("Gross Profit", COLOR_GP, "SG&A", COLOR_OPEX, sga, "rgba(243, 156, 18, 0.3)")
-            
-        remaining_opex = op_expense - rd - sga
-        if remaining_opex > 0:
-             add_link("Gross Profit", COLOR_GP, "Other OpEx", COLOR_OPEX, remaining_opex, "rgba(243, 156, 18, 0.3)")
-        
-        add_link("Gross Profit", COLOR_GP, "Operating Income", COLOR_GP, op_income, "rgba(40, 180, 99, 0.3)")
-        
-        # 4. Op Income -> Tax & Net Income
-        add_link("Operating Income", COLOR_GP, "Tax", COLOR_COST, tax, "rgba(231, 76, 60, 0.3)")
-        add_link("Operating Income", COLOR_GP, "Net Income", COLOR_NET, net_income, "rgba(30, 132, 73, 0.5)")
-        
-        return {
-            "label": labels,
-            "color": node_colors,
-            "source": source,
-            "target": target,
-            "value": value,
-            "link_color": link_colors,
-            "custom_data": custom_data
-        }
-
-    except Exception as e:
-        print(f"Sankey Error: {e}")
-        return None
-    """
-    Summarizes news using Gemini API.
-    """
-    if not api_key:
-        return "Please provide a gemini API Key to see the summary."
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-
-        
-        # Prepare content
-        news_text = ""
-        for i, item in enumerate(news_items[:7]): # Limit to 7 items
-            news_text += f"{i+1}. {item.get('title')} ({item.get('source')}) - {item.get('body')}\n"
-            
-        prompt = f"""
-        You are a financial analyst. Based on the following recent news titles and snippets, provide a concise summary of what is driving the stock's sentiment.
-        
-        Then, list the top 3 most important articles from the provided list. For each, strictly format it as:
-        - **[Title]**: Why it's worth reading.
-        
-        News Items:
-        {news_text}
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error gathering AI summary: {e}. (Ensure API Key is valid and supports 'gemini-2.0-flash-exp')"
 
 def format_large_number(num):
     """
@@ -274,127 +49,129 @@ def format_large_number(num):
 def search_earnings_context(ticker_symbol):
     """
     Searches for earnings call takeaways and financial analysis.
+    Enhanced with multi-dimensional search for small-cap stock coverage.
     """
     try:
-        # Search for earnings take aways (Past Year)
-        query = f"{ticker_symbol} earnings analysis bull bear thesis"
-        results = DDGS().news(keywords=query, region="us-en", safesearch="off", timelimit="y", max_results=5)
-        return results
+        # Get company name for better search coverage
+        try:
+            ticker_obj = yf.Ticker(ticker_symbol)
+            info = ticker_obj.info
+            company_name = info.get('shortName', ticker_symbol)
+            sector = info.get('sector', '')
+        except:
+            company_name = ticker_symbol
+            sector = ''
+        
+        results = []
+        seen_urls = set()
+        
+        # Multi-dimensional search strategy
+        search_queries = [
+            # Tier 1: Company name + earnings (most specific)
+            f'"{company_name}" earnings report revenue growth',
+            f'"{company_name}" quarterly results analysis',
+            
+            # Tier 2: Ticker + investment thesis
+            f'{ticker_symbol} stock investment thesis bull case',
+            f'{ticker_symbol} stock risks challenges bear case',
+            
+            # Tier 3: Company + financial metrics
+            f'"{company_name}" gross margin operating income',
+        ]
+        
+        for query in search_queries:
+            try:
+                # Use web search for broader coverage (not just news)
+                web_results = list(DDGS().text(
+                    keywords=query, 
+                    region="us-en", 
+                    safesearch="off",
+                    max_results=3
+                ))
+                
+                for r in web_results:
+                    url = r.get('href', '')
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        # Extract domain for quality scoring
+                        domain = url.split('/')[2] if len(url.split('/')) > 2 else ''
+                        results.append({
+                            'title': r.get('title', ''),
+                            'body': r.get('body', ''),
+                            'url': url,
+                            'source': domain,
+                        })
+            except Exception as e:
+                print(f"Search query failed: {query} - {e}")
+                continue
+        
+        # Also run news search for recent coverage
+        try:
+            news_results = DDGS().news(
+                keywords=f"{ticker_symbol} OR \"{company_name}\" earnings",
+                region="us-en", 
+                safesearch="off", 
+                timelimit="6m",  # Last 6 months for fresher data
+                max_results=5
+            )
+            for item in news_results:
+                url = item.get('url', '')
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    results.append(item)
+        except:
+            pass
+        
+        # Quality-based sorting: prioritize authoritative sources
+        quality_sources = ['sec.gov', 'seekingalpha', 'bloomberg', 'reuters', 'wsj', 'yahoo', 'nasdaq']
+        
+        def quality_score(item):
+            source = str(item.get('source', item.get('url', ''))).lower()
+            for i, qs in enumerate(quality_sources):
+                if qs in source:
+                    return i
+            return len(quality_sources)
+        
+        results.sort(key=quality_score)
+        
+        print(f"DEBUG: search_earnings_context found {len(results)} results for {ticker_symbol}")
+        return results[:12]  # Return top 12 quality results
+        
     except Exception as e:
         print(f"Error searching earnings context: {e}")
         return []
 
-def synthesize_core_focus(ticker, context_results, api_key):
-    """
-    Synthesizes search results into a 'Core Strategic Focus' summary with Bull/Bear split.
-    """
-    if not api_key:
-        return "Please provide a gemini API Key to see the analysis."
-    if not context_results:
-        return "No recent earnings analysis found to summarize."
-        
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        context_text = ""
-        for item in context_results:
-            context_text += f"- Title: {item.get('title')}\n  Snippet: {item.get('body')}\n"
-            
-        prompt = f"""
-        You are a senior investment strategist. Based on the following search results regarding {ticker}'s recent earnings and financial reports:
-        
-        Provide a balanced strategic view. 
-        **Style Guide**: Write in a smooth, professional narrative. **Do not** force numbers if they make the sentence choppy. Instead, weave them naturally into the explanation (e.g., "...driven by a 20% surge in revenue..."). Avoid using asterisks (*) for emphasis inside sentences.
-        
-        1. **🐂 Bull Case (Optimistic)**: Main argument for buying. Support with specific product success or growth metrics where they fit naturally.
-        2. **🐻 Bear Case (Pessimistic)**: Main risk. Support with valuation concerns or margin compression facts.
-        3. **🔑 Key Variance**: Where do bulls and bears disagree?
 
-        **Formatting Rules (CRITICAL)**:
-        - **NO LaTeX**: Do NOT use `$` signs to wrap sentences or numbers (e.g. `$27.5M profit$`). This destroys spacing.
-        - **Currency**: Write "$27.5 billion" or "27.5 billion USD".
-        - **Spaces**: Ensure proper spacing between words (e.g., "The 300 Billion" not "The300Billion").
 
-        Context:
-        {context_text}
-        
-        Output format:
-        **🐂 Bull Case**: [Narrative paragraph]
-        
-        **🐻 Bear Case**: [Narrative paragraph]
-        
-        **🔑 Key Variance**: [1 sentence]
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error synthesizing core focus: {e}"
+
 
 def search_key_events(ticker_symbol):
     """
-    Searches for major events (Past 3 months & Future 3 months).
+    Searches for major events using a Hybrid approach (Web for Dates + News for Events).
     """
     try:
-        # Search 1: Recent Past
-        query_past = f"{ticker_symbol} major corporate events news last 3 months"
-        results_past = DDGS().news(keywords=query_past, region="us-en", safesearch="off", max_results=3)
+        results = []
         
-        # Search 2: Upcoming Future
-        query_future = f"{ticker_symbol} upcoming major events earnings product launch next 3 months"
-        results_future = DDGS().news(keywords=query_future, region="us-en", safesearch="off", max_results=3)
+        # 1. Broad Web Search for Specific Dates (Calendars, Earnings)
+        # Targeted for sites like Nasdaq, MarketBeat, Yahoo Finance
+        query_date = f"{ticker_symbol} next earnings date"
+        web_results = list(DDGS().text(keywords=query_date, region="us-en", safesearch="off", max_results=4))
+        print(f"DEBUG: '{query_date}' -> {len(web_results)} results")
+        if web_results:
+             results.extend(web_results)
         
-        # Combine unique results
-        all_results = results_past + results_future
-        return all_results
+        # 2. News Search for Recent/Upcoming Developments
+        query_news = f"{ticker_symbol} corporate news product launch FDA approval"
+        news_results = DDGS().news(keywords=query_news, region="us-en", safesearch="off", max_results=3)
+        if news_results:
+             results.extend(news_results)
+             
+        return results
     except Exception as e:
         print(f"Error searching key events: {e}")
         return []
 
-def synthesize_key_events(ticker, context_results, api_key):
-    """
-    Summarizes Major Events (Timeline: Past & Future).
-    """
-    if not api_key or not context_results:
-        return "No major events found."
 
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        context_text = ""
-        for item in context_results:
-            context_text += f"- Title: {item.get('title')}\n  Date: {item.get('date')}\n  Snippet: {item.get('body')}\n"
-            
-        prompt = f"""
-        Identify the Major Corporate Events for {ticker}.
-        Categorize into "Recent" (Past 3 Months) and "Upcoming" (Next 3 Months).
-        
-        Focus on: Earnings, Product Launches, M&A, FDA approvals, or specific conference dates.
-        
-        Output format:
-        **🕒 Recent Highlights (Past 3 Months)**:
-        * **[Date] - [Event]**: [Impact]
-        
-        **🔮 Upcoming Catalysts (Next 3 Months)**:
-        * **[Est. Date] - [Event]**: [Why it matters]
-
-        **Formatting Rules (CRITICAL)**:
-        - **NO LaTeX**: Do NOT use `$` to wrap text. 
-        - **Currency**: Correct: "$5 Million". Incorrect: "$5 Million$".
-        - **Markdown**: Use `**bold**` only for headers/dates.
-
-        If no upcoming events are found, explicit state "No major confirmed upcoming events found."
-        
-        Context:
-        {context_text}
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error synthesizing key events: {e}"
 
 def search_financial_analysis(ticker_symbol):
     """
@@ -408,57 +185,7 @@ def search_financial_analysis(ticker_symbol):
         print(f"Error searching financial analysis: {e}")
         return []
 
-def synthesize_financial_changes(ticker, context_results, api_key):
-    """
-    Synthesizes reasons behind financial changes.
-    """
-    if not api_key:
-        return "Please provide a gemini API Key to see the analysis."
-    if not context_results:
-        return "No recent financial analysis found to summarize."
-        
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        context_text = ""
-        for item in context_results:
-            context_text += f"- Title: {item.get('title')}\n  Snippet: {item.get('body')}\n"
-            
-        prompt = f"""
-        You are a financial analyst. Based on the following search results regarding {ticker}'s recent financial results:
-        
-        Explain the "WHY" behind the movement of key metrics.
-        **CRITICAL**: When discussing financing (Debt, Convertibles, Equity raises), you MUST provide specific facts found in the text:
-        - How much was raised? (e.g. $500M)
-        - At what price/interest rate? (e.g. converted at $12.50, or 5% coupon)
-        - With whom? (if mentioned)
 
-        - With whom? (if mentioned)
-
-        **Formatting Rules (CRITICAL)**:
-        - **NO LaTeX**: Do NOT use `$` signs to wrap sentences.
-        - **Currency**: Direct format: "$500M" or "500 million USD".
-        - **Validation**: Check that spaces exist between all words.
-        
-        Output format:
-        **Revenue Drivers**:
-        * [Reason 1]
-        
-        **Profitability & Margins**:
-        * [Reason 1]
-        
-        **Operating Cash Flow & Capital (Specifics Required)**:
-        * [Reason 1 - citing specific amounts/rates]
-        
-        Context:
-        {context_text}
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error synthesizing financial changes: {e}"
 
 def search_revenue_segments(ticker_symbol):
     """
@@ -472,149 +199,13 @@ def search_revenue_segments(ticker_symbol):
         print(f"Error searching revenue segments: {e}")
         return []
 
-def synthesize_revenue_segments(ticker, context_results, api_key):
-    """
-    Returns JSON string of segment data: [{label, value, growth}].
-    """
-    if not api_key or not context_results:
-        return "[]"
-        
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        context_text = ""
-        for item in context_results:
-            context_text += f"- Title: {item.get('title')}\n  Snippet: {item.get('body')}\n"
-            
-        prompt = f"""
-        You are a data extraction assistant. Based on the following search results for {ticker}:
-        
-        Extract the most recent Revenue Breakdown by Segment.
-        Return ONLY a raw JSON array. No markdown formatting.
-        
-        Format:
-        [
-            {{"label": "Segment Name", "value": 12.5, "growth": "+5%"}},
-            {{"label": "Segment Name 2", "value": 4.2, "growth": "-2%"}}
-        ]
-        
-        Rules:
-        - "value" should be a number (in Billions USD if possible, or relevant scale).
-        - If exact value is not found, estimate or use 0.
-        - "growth" is the YoY or QoQ change as a string (e.g. "+12%").
-        
-        Context:
-        {context_text}
-        """
-        
-        response = model.generate_content(prompt)
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        return text
-    except Exception as e:
-        print(f"Error synthesizing segments: {e}")
-        return "[]"
 
-def synthesize_core_driver(ticker, context_results, api_key):
-    """
-    Identifies the single most important stock price mover.
-    """
-    if not api_key or not context_results:
-        return "N/A"
-        
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        context_text = ""
-        for item in context_results:
-            context_text += f"- Title: {item.get('title')}\n  Snippet: {item.get('body')}\n"
-            
-        prompt = f"""
-        Based on the recent news/earnings for {ticker}:
-        What is the #1 specific metric or driver currently moving the stock price? (e.g. "AWS Growth Acceleration", "iPhone Cycle strength", "Ad Revenue recovery").
-        
-        Return ONLY the name of the driver (max 5 words).
-        
-        Context:
-        {context_text}
-        """
-        
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        return "N/A"
-
-    except Exception as e:
-        return "N/A"
-
-def synthesize_competitors(ticker, api_key):
-    """
-    Returns a list of top 3 competitor tickers (e.g. ['MSFT', 'GOOG']).
-    """
-    if not api_key:
-        return []
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        prompt = f"""
-        List the top 4 direct public competitors for {ticker}.
-        Return ONLY a JSON list of tickers.
-        Example: ["COMP1", "COMP2", "COMP3", "COMP4"]
-        """
-        
-        response = model.generate_content(prompt)
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        tickers = json.loads(text)
-        return tickers
-    except Exception as e:
-        print(f"Error finding competitors: {e}")
-        return []
 
 def get_competitor_data(tickers):
     """
     Fetches basic metrics and 3M/6M/12M performance for a list of tickers.
     """
-    data = []
-    
-    for t in tickers:
-        try:
-            stock = yf.Ticker(t)
-            info = stock.info
-            
-            # Fetch 1y history for returns calculation
-            hist = stock.history(period="1y")
-            
-            # Helper for percentage change
-            def get_change(days_ago):
-                if len(hist) > days_ago:
-                    start_price = hist['Close'].iloc[-(days_ago + 1)]
-                    curr_price = hist['Close'].iloc[-1]
-                    return ((curr_price - start_price) / start_price) * 100
-                return 0.0
-
-            # Approximation: 21 trading days/mo
-            chg_3m = get_change(63) 
-            chg_6m = get_change(126)
-            chg_1y = get_change(250) if len(hist) > 240 else 0.0
-
-            data.append({
-                "Ticker": t,
-                "Name": info.get('shortName', t),
-                "Price": info.get('currentPrice', 0),
-                "P/E": info.get('trailingPE', 0),
-                "Market Cap": info.get('marketCap', 0),
-                "3M %": chg_3m,
-                "6M %": chg_6m,
-                "1Y %": chg_1y
-            })
-        except Exception as e:
-            print(f"Error fetching data for {t}: {e}")
-            continue
-            
-    return pd.DataFrame(data)
+    return obb_utils.get_competitor_data(tickers)
 
 def get_competitor_history(tickers):
     """
@@ -640,19 +231,26 @@ def get_competitor_history(tickers):
         print(f"Error fetching competitor history: {e}")
         return pd.DataFrame()
 
-def get_sankey_data(ticker_symbol, financials, segments_json):
+def get_sankey_data(ticker_symbol, financials, segments_json, agent=None):
     """
     Prepares node/link data for an Income Statement Sankey Diagram.
-    Style: App Economy (Blue Revenue, Green Profit, Red Costs).
+    
+    Uses a 3-tier approach:
+    1. Check cache for previously inferred structure
+    2. If cache miss and agent provided, use AI to infer structure
+    3. Fallback to simplified fixed structure
     """
+    import sankey_cache_manager
+    
     try:
         inc = financials.get('income_stmt', pd.DataFrame())
         if inc.empty:
             return None
         
-        # Get most recent quarter label
+        # Get most recent quarter data
         col = inc.columns[0]
         recent = inc[col]
+        recent_dict = recent.to_dict()
         
         # Format date to YYQx (e.g. 2024-09-30 -> 24Q3)
         try:
@@ -662,117 +260,197 @@ def get_sankey_data(ticker_symbol, financials, segments_json):
         except:
             period_label = str(col).split(' ')[0]
 
-        # Extract Core Values (Absolute positives)
-        total_rev = abs(recent.get('Total Revenue', 0))
-        cogs = abs(recent.get('Cost Of Revenue', 0))
-        gross_profit = abs(recent.get('Gross Profit', 0))
+        # === Tier 1: Check Cache ===
+        cached_structure = sankey_cache_manager.get_cached_structure(ticker_symbol)
         
-        # OpEx Breakdown
-        op_expense = abs(recent.get('Operating Expense', 0)) 
-        rd = abs(recent.get('Research And Development', 0))
-         # Fallback if specific lines missing
-        if rd == 0:
-             rd = 0
-             
-        sga = abs(recent.get('Selling General And Administration', 0))
+        # === Tier 2: AI Inference (if no cache and agent available) ===
+        if cached_structure is None and agent is not None:
+            print(f"Cache miss for {ticker_symbol}, using AI to infer structure...")
+            inferred = agent.infer_sankey_structure(recent_dict)
+            if inferred:
+                sankey_cache_manager.save_structure(ticker_symbol, inferred)
+                cached_structure = inferred
         
-        op_income = abs(recent.get('Operating Income', 0))
-        
-        tax = abs(recent.get('Tax Provision', 0))
-        net_income = abs(recent.get('Net Income', 0))
-        
-        # Colors
-        COLOR_REV = "#2E86C1" # Blue
-        COLOR_COST = "#E74C3C" # Red
-        COLOR_GP = "#28B463" # Green
-        COLOR_OPEX = "#F39C12" # Orange
-        COLOR_NET = "#1E8449" # Dark Green
-        COLOR_GREY = "#95A5A6"
-        
-        # --- Nodes ---
-        labels = []
-        node_colors = []
-        
-        source = []
-        target = []
-        value = []
-        link_colors = []
-        custom_data = [] # For tooltip strings
-        
-        # Helper to get index
-        def get_idx(name, color):
-            if name not in labels:
-                labels.append(name)
-                node_colors.append(color)
-            return labels.index(name)
-
-        # Helper to add link
-        def add_link(src_name, src_color, tgt_name, tgt_color, val, link_color=None):
-            if val <= 0: return
-            s = get_idx(src_name, src_color)
-            t = get_idx(tgt_name, tgt_color)
-            source.append(s)
-            target.append(t)
-            value.append(val)
-            link_colors.append(link_color if link_color else "rgba(180, 180, 180, 0.5)")
-            
-            # Format value for tooltip (B or M)
-            fmt_val = format_large_number(val)
-            custom_data.append(fmt_val)
-
-        # 1. Segments -> Revenue
-        segments_total = 0
-        try:
-            segs = json.loads(segments_json)
-            if segs:
-                sorted_segs = sorted(segs, key=lambda x: float(x.get('value', 0)), reverse=True)
-                for s in sorted_segs:
-                    val = float(s['value']) * 1e9 
-                    add_link(f"{s['label']}", "#5DADE2", "Total Revenue", COLOR_REV, val, "rgba(93, 173, 226, 0.3)")
-                    segments_total += val
-        except:
-            pass
-            
-        # 2. Revenue -> COGS & Gross Profit
-        add_link("Total Revenue", COLOR_REV, "Cost of Revenue", COLOR_COST, cogs, "rgba(231, 76, 60, 0.3)")
-        add_link("Total Revenue", COLOR_REV, "Gross Profit", COLOR_GP, gross_profit, "rgba(40, 180, 99, 0.3)")
-        
-        # 3. Gross Profit -> OpEx & Op Income
-        # Define OpEx nodes first to ensure order? Plotly arranges automatically.
-        if rd > 0:
-            add_link("Gross Profit", COLOR_GP, "R&D", COLOR_OPEX, rd, "rgba(243, 156, 18, 0.3)")
-        if sga > 0:
-            add_link("Gross Profit", COLOR_GP, "SG&A", COLOR_OPEX, sga, "rgba(243, 156, 18, 0.3)")
-            
-        remaining_opex = op_expense - rd - sga
-        if remaining_opex > 0:
-             add_link("Gross Profit", COLOR_GP, "Other OpEx", COLOR_OPEX, remaining_opex, "rgba(243, 156, 18, 0.3)")
-        
-        add_link("Gross Profit", COLOR_GP, "Operating Income", COLOR_GP, op_income, "rgba(40, 180, 99, 0.3)")
-        
-        # 4. Op Income -> Tax & Net Income
-        add_link("Operating Income", COLOR_GP, "Tax", COLOR_COST, tax, "rgba(231, 76, 60, 0.3)")
-        add_link("Operating Income", COLOR_GP, "Net Income", COLOR_NET, net_income, "rgba(30, 132, 73, 0.5)")
-        
-        # Format Labels with Value
-        formatted_labels = []
-        for l in labels:
-            formatted_labels.append(l)
-
-        return {
-            "period": period_label, # New field
-            "label": formatted_labels,
-            "color": node_colors,
-            "source": source,
-            "target": target,
-            "value": value,
-            "link_color": link_colors,
-            "custom_data": custom_data
-        }
-
+        # === Tier 3: Use cached/inferred structure OR fallback ===
+        if cached_structure:
+            return _build_sankey_from_structure(
+                ticker_symbol, recent_dict, cached_structure, period_label, segments_json
+            )
+        else:
+            # Fallback to simplified fixed structure
+            return _build_sankey_fallback(ticker_symbol, recent, period_label, segments_json)
+    
     except Exception as e:
         print(f"Sankey Error: {e}")
         return None
+
+
+def _build_sankey_from_structure(ticker_symbol, recent_dict, structure, period_label, segments_json):
+    """
+    Builds Sankey data from AI-inferred structure.
+    """
+    # Colors
+    COLORS = {
+        0: "#2E86C1",  # Blue (Revenue)
+        1: "#28B463",  # Green (Profit) / Red for costs handled separately
+        2: "#F39C12",  # Orange (OpEx)
+        3: "#1E8449",  # Dark Green (Net Income)
+    }
+    COLOR_COST = "#E74C3C"  # Red for costs
+    
+    labels = []
+    node_colors = []
+    node_x = []
+    node_y = []
+    
+    source = []
+    target = []
+    value = []
+    link_colors = []
+    custom_data = []
+    
+    # Build nodes from structure
+    field_mapping = structure.get('field_mapping', {})
+    nodes = structure.get('nodes', [])
+    links = structure.get('links', [])
+    
+    # Create node index map
+    node_index = {}
+    
+    # Sort nodes by layer for consistent positioning
+    sorted_nodes = sorted(nodes, key=lambda n: (n.get('layer', 0), n.get('name', '')))
+    
+    for i, node in enumerate(sorted_nodes):
+        name = node.get('name', f'Node{i}')
+        layer = node.get('layer', 0)
+        
+        labels.append(name)
+        node_index[name] = i
+        
+        # Determine color based on layer and name
+        if 'cost' in name.lower() or 'expense' in name.lower() or 'tax' in name.lower():
+            node_colors.append(COLOR_COST)
+        else:
+            node_colors.append(COLORS.get(layer, "#95A5A6"))
+        
+        # Calculate x position based on layer (0-1 range)
+        max_layer = max(n.get('layer', 0) for n in nodes) or 1
+        node_x.append(layer / max_layer * 0.8 + 0.1)
+        
+        # Y position will be auto-calculated by Plotly
+        node_y.append(0.5)
+    
+    # Build links from structure
+    for link in links:
+        src_name = link.get('source', '')
+        tgt_name = link.get('target', '')
+        field_name = link.get('field', tgt_name)
+        
+        if src_name not in node_index or tgt_name not in node_index:
+            continue
+        
+        # Get value from recent data using field mapping
+        actual_field = field_mapping.get(tgt_name, field_name)
+        val = abs(float(recent_dict.get(actual_field, 0) or 0))
+        
+        if val <= 0:
+            continue
+        
+        source.append(node_index[src_name])
+        target.append(node_index[tgt_name])
+        value.append(val)
+        
+        # Determine link color based on target
+        if 'cost' in tgt_name.lower() or 'expense' in tgt_name.lower() or 'tax' in tgt_name.lower():
+            link_colors.append("rgba(231, 76, 60, 0.4)")
+        elif 'profit' in tgt_name.lower() or 'income' in tgt_name.lower():
+            link_colors.append("rgba(40, 180, 99, 0.4)")
+        else:
+            link_colors.append("rgba(180, 180, 180, 0.4)")
+        
+        custom_data.append(format_large_number(val))
+    
+    if not value:
+        return None
+    
+    return {
+        "period": period_label,
+        "label": labels,
+        "color": node_colors,
+        "source": source,
+        "target": target,
+        "value": value,
+        "link_color": link_colors,
+        "custom_data": custom_data
+    }
+
+
+def _build_sankey_fallback(ticker_symbol, recent, period_label, segments_json):
+    """
+    Fallback: Simplified fixed structure for when AI is unavailable.
+    Only shows Revenue -> Gross Profit/COGS -> Net Income.
+    """
+    # Colors
+    COLOR_REV = "#2E86C1"
+    COLOR_COST = "#E74C3C"
+    COLOR_GP = "#28B463"
+    COLOR_NET = "#1E8449"
+    
+    labels = []
+    node_colors = []
+    source = []
+    target = []
+    value = []
+    link_colors = []
+    custom_data = []
+    
+    def get_idx(name, color):
+        if name not in labels:
+            labels.append(name)
+            node_colors.append(color)
+        return labels.index(name)
+    
+    def add_link(src_name, src_color, tgt_name, tgt_color, val, link_color=None):
+        if val <= 0:
+            return
+        s = get_idx(src_name, src_color)
+        t = get_idx(tgt_name, tgt_color)
+        source.append(s)
+        target.append(t)
+        value.append(val)
+        link_colors.append(link_color if link_color else "rgba(180, 180, 180, 0.5)")
+        custom_data.append(format_large_number(val))
+    
+    # Extract basic values
+    total_rev = abs(recent.get('Total Revenue', 0) or 0)
+    cogs = abs(recent.get('Cost Of Revenue', 0) or 0)
+    gross_profit = abs(recent.get('Gross Profit', 0) or 0)
+    net_income = abs(recent.get('Net Income', 0) or 0)
+    
+    if total_rev <= 0:
+        return None
+    
+    # Build simplified structure
+    add_link("Total Revenue", COLOR_REV, "Cost of Revenue", COLOR_COST, cogs, "rgba(231, 76, 60, 0.3)")
+    add_link("Total Revenue", COLOR_REV, "Gross Profit", COLOR_GP, gross_profit, "rgba(40, 180, 99, 0.3)")
+    
+    if gross_profit > 0 and net_income > 0:
+        add_link("Gross Profit", COLOR_GP, "Net Income", COLOR_NET, net_income, "rgba(30, 132, 73, 0.5)")
+    
+    if not value:
+        return None
+    
+    return {
+        "period": period_label,
+        "label": labels,
+        "color": node_colors,
+        "source": source,
+        "target": target,
+        "value": value,
+        "link_color": link_colors,
+        "custom_data": custom_data
+    }
+
 
 def get_financials(ticker):
     """
@@ -791,93 +469,13 @@ def get_financials(ticker):
 
 def get_historical_data(ticker, period="1y"):
     """
-    Fetches historical price data.
+    Fetches historical price data using OpenBB (via obb_utils).
     """
-    try:
-        df = ticker.history(period=period)
-        return df
-    except Exception as e:
-        print(f"Error fetching history: {e}")
+    # Extract symbol if ticker is a yfinance Ticker object
+    symbol = ticker.ticker if hasattr(ticker, 'ticker') else str(ticker)
+    return obb_utils.get_historical_data(symbol, period)
 
-def generate_falsifiable_thesis(ticker, context_text, api_key):
-    """
-    Generates a draft falsifiable thesis based on provided context.
-    """
-    if not api_key:
-        return None
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        prompt = f"""
-        You are a disciplined investment strategist who believes in Karl Popper's "Falsifiability".
-        
-        Based on the following context for {ticker}, generate a DRAFT Investment Thesis.
-        
-        Context:
-        {context_text[:10000]} # Limit context
-        
-        **Your Goal**:
-        Create a thesis that is **NOT** just "it will go up". It must be a specific hypothesis with a "Kill Switch".
-        
-        **Output Format (JSON only)**:
-        {{
-            "thesis_statement": "The core argument (e.g. 'Cloud revenue will accelerate due to AI adoption').",
-            "falsification_condition": "Specific, measurable event/metric that proves you WRONG (e.g. 'Cloud growth slows below 15% for 2 quarters').",
-            "time_horizon": "e.g. 6-12 Months",
-            "confidence": 7
-        }}
-        
-        Rules:
-        - "falsification_condition" MUST be specific (numbers, specific events), not vague "if bad things happen".
-        - Returns ONLY valid JSON.
-        """
-        
-        response = model.generate_content(prompt)
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text)
-        return data
-        
-    except Exception as e:
-        return {"error": str(e)}
 
-def refine_thesis_text(current_text, current_condition, instruction, api_key):
-    """
-    Refines the thesis text based on user instruction.
-    """
-    if not api_key:
-        return current_text, current_condition
-        
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        prompt = f"""
-        You are an editor for an investment journal.
-        
-        Current Thesis: "{current_text}"
-        Current Kill Switch: "{current_condition}"
-        
-        User Instruction: "{instruction}" (e.g. "Make it more professional", "Focus more on margins", "Translate to Chinese")
-        
-        Refine the Thesis and Kill Switch based on the instruction. Keep the core logic unless asked to change it.
-        
-        Output (JSON):
-        {{
-            "thesis_statement": "...",
-            "falsification_condition": "..."
-        }}
-        """
-        
-        response = model.generate_content(prompt)
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text)
-        return data.get("thesis_statement", current_text), data.get("falsification_condition", current_condition)
-        
-    except Exception as e:
-        return current_text, current_condition
-        return pd.DataFrame()
 
 def calculate_momentum(df):
     """
@@ -923,40 +521,6 @@ def analyze_investment_signals(info, df):
         signals.append("📉 **Bearish Trend**: Price is below the 50-day SMA.")
 
     return signals
-
-    return signals
-
-def get_company_branding_keywords(ticker, api_key):
-    """
-    Uses AI to identify the Company Name and Top 3 Famous Products.
-    Returns a list of keywords for filtering.
-    """
-    if not api_key:
-        return []
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        prompt = f"""
-        Analyze the stock ticker: {ticker}.
-        Identify:
-        1. Parent Company Name (e.g. Alphabet Inc.)
-        2. Common Colloquial Name (e.g. Google)
-        3. Sibling/Dual-Class Tickers (e.g. if GOOG, return GOOGL too).
-        4. Top 3 Famous Products (e.g. iPhone, YouTube, Search).
-
-        Return ONLY a comma-separated list of these keywords.
-        Example for GOOG: Alphabet, Google, GOOGL, YouTube, Cloud
-        """
-        
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        keywords = [k.strip() for k in text.split(',') if k.strip()]
-        return keywords
-    except Exception as e:
-        print(f"Error getting branding keywords: {e}")
-        return []
 
 def get_polymarket_data(ticker_symbol, company_name=None, extra_keywords=None):
     """

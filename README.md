@@ -25,7 +25,7 @@ A comprehensive stock analysis dashboard built with **Streamlit** and **Python**
 
 ## Tech Stack
 - **Frontend**: Streamlit
-- **Data**: yfinance, DuckDuckGo Search (news)
+- **Data**: OpenBB Platform (Primary), Tiingo, yfinance, DuckDuckGo Search (news)
 - **AI**: Google Gemini (via `google-generativeai`)
 - **Visualization**: Plotly, Altair
 - **Technical Analysis**: `ta` library (RSI, SMA)
@@ -47,7 +47,8 @@ A comprehensive stock analysis dashboard built with **Streamlit** and **Python**
    - Create a `.env` file in the root directory.
    - Add your Gemini API key:
      ```
-     GEMINI_API_KEY=your_api_key_here
+     GEMINI_API_KEY=your_gemini_key
+     TIINGO_TOKEN=your_tiingo_token
      ```
 
 ## Usage
