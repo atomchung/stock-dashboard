@@ -12,3 +12,5 @@ requests
 # OpenBB
 openbb-core
 openbb-yfinance
+openbb-equity
+openbb-news

@@ -109,13 +109,22 @@ def get_news(ticker_symbol, limit=10):
 
         if res and res.results:
             for item in res.results:
+                # Helper to safely get attribute or dict key
+                def get_val(obj, key, default=''):
+                    if isinstance(obj, dict):
+                        return obj.get(key, default)
+                    return getattr(obj, key, default)
+
                 # Standardize to list of dicts: {'title', 'source', 'date', 'body', 'url'}
+                # Yfinance provider often puts content in 'summary' or 'text'
+                body = get_val(item, 'body') or get_val(item, 'text') or get_val(item, 'summary') or ''
+                
                 news_items.append({
-                    'title': getattr(item, 'title', ''),
-                    'source': getattr(item, 'source', 'OpenBB'),
-                    'date': str(getattr(item, 'date', '')), # Convert datetime to str
-                    'body': getattr(item, 'text', '') or getattr(item, 'summary', ''), # 'text' or 'summary'
-                    'url': getattr(item, 'url', '')
+                    'title': get_val(item, 'title', ''),
+                    'source': get_val(item, 'source', 'OpenBB'),
+                    'date': str(get_val(item, 'date', '')), # Convert datetime to str
+                    'body': body, 
+                    'url': get_val(item, 'url', '')
                 })
             # If we got good results, return them. 
             # Note: OpenBB yfinance provider sometimes gives empty 'text' body.
@@ -279,4 +288,185 @@ def get_competitor_data(tickers):
         except:
             continue
     return pd.DataFrame(data)
+
+def get_calendar_events(ticker_symbol):
+    """
+    Fetches major calendar events (Earnings, Dividends).
+    
+    Data Sources (in order):
+    1. Daily cache (to minimize API calls)
+    2. FMP Earnings Calendar API (most reliable)
+    3. yfinance calendar (fallback)
+    """
+    import earnings_cache_manager
+    import requests
+    import os
+    from datetime import datetime, timedelta
+    
+    # 1. Check cache first
+    cached = earnings_cache_manager.get_cached_earnings(ticker_symbol)
+    if cached is not None:
+        return cached
+    
+    dates = {}
+    
+    # 2. Try FMP API (new /stable endpoint)
+    fmp_key = os.environ.get("FMP_API_KEY")
+    if fmp_key:
+        try:
+            # FMP /stable/earnings - returns all earnings history/future for a symbol
+            url = f"https://financialmodelingprep.com/stable/earnings?symbol={ticker_symbol.upper()}&apikey={fmp_key}"
+            
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Check for API error message
+                if isinstance(data, dict) and 'Error Message' in data:
+                    print(f"[FMP] API Error: {data['Error Message']}")
+                elif isinstance(data, list) and len(data) > 0:
+                    # Find next future earnings (epsActual is null for future dates)
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    
+                    for item in data:
+                        item_date = item.get('date', '')
+                        eps_actual = item.get('epsActual')
+                        
+                        # Future earnings: date >= today AND epsActual is null
+                        if item_date >= today_str and eps_actual is None:
+                            dates['next_earnings'] = item_date
+                            # Capture EPS estimate if available
+                            eps_est = item.get('epsEstimated')
+                            if eps_est:
+                                dates['eps_estimated'] = eps_est
+                            # Capture revenue estimate
+                            rev_est = item.get('revenueEstimated')
+                            if rev_est:
+                                dates['revenue_estimated'] = rev_est
+                            dates['source'] = 'FMP'
+                            print(f"[FMP] Found next earnings date for {ticker_symbol}: {item_date}")
+                            break
+                    
+                    # Cache the result
+                    earnings_cache_manager.save_earnings(ticker_symbol, dates)
+                    
+                    if dates.get('next_earnings'):
+                        return dates
+                        
+        except Exception as e:
+            print(f"[FMP] Error fetching earnings: {e}")
+    
+    # 3. Fallback to yfinance for dividend info and as backup
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        calendar = ticker.calendar
+        
+        if calendar is not None and not calendar.empty:
+            # Handle both Dict and DataFrame formats from yfinance
+            if isinstance(calendar, dict):
+                earnings = calendar.get('Earnings Date')
+                div = calendar.get('Dividend Date')
+                ex_div = calendar.get('Ex-Dividend Date')
+            else:
+                try:
+                    earnings = calendar.loc['Earnings Date'].values if 'Earnings Date' in calendar.index else None
+                    div = calendar.loc['Dividend Date'].values if 'Dividend Date' in calendar.index else None
+                    ex_div = calendar.loc['Ex-Dividend Date'].values if 'Ex-Dividend Date' in calendar.index else None
+                except:
+                    earnings = None
+                    div = None
+                    ex_div = None
+
+            # Only use yfinance earnings if FMP didn't find any
+            if not dates.get('next_earnings') and earnings is not None:
+                val = earnings[0] if (isinstance(earnings, list) or hasattr(earnings, '__iter__')) and len(earnings) > 0 else earnings
+                if val: 
+                    dates['next_earnings'] = str(val)
+                    dates['source'] = 'yfinance'
+
+            if div is not None:
+                val = div[0] if (isinstance(div, list) or hasattr(div, '__iter__')) and len(div) > 0 else div
+                if val: dates['dividend_date'] = str(val)
+
+            if ex_div is not None:
+                val = ex_div[0] if (isinstance(ex_div, list) or hasattr(ex_div, '__iter__')) and len(ex_div) > 0 else ex_div
+                if val: dates['ex_dividend'] = str(val)
+                
+    except Exception as e:
+        print(f"[yfinance] Error fetching calendar: {e}")
+    
+    # Cache final result
+    earnings_cache_manager.save_earnings(ticker_symbol, dates)
+    
+    return dates
+
+def get_pe_band_data(ticker_symbol):
+    """
+    Calculates PE Band data for the last 2 years.
+    Returns a DataFrame with columns: ['Close', 'PE_15x', 'PE_20x', 'PE_25x']
+    Uses yfinance earnings_dates to reconstruct historical TTM EPS.
+    """
+    try:
+        t = yf.Ticker(ticker_symbol)
+        
+        # 1. Get Earnings History
+        # earnings_dates 'Reported EPS' is what we need.
+        ed = t.earnings_dates
+        if ed is None or ed.empty:
+            return pd.DataFrame()
+
+        # Clean and Sort
+        # Filter for actual reported EPS (remove future estimates/NaNs)
+        ed = ed.dropna(subset=['Reported EPS']).sort_index()
+        
+        # 2. Calculate TTM EPS
+        # TTM EPS at any point is the sum of the last 4 reported EPS.
+        # We calculate rolling sum.
+        ed['TTM_EPS'] = ed['Reported EPS'].rolling(window=4).sum()
+        
+        # 3. Fetch Price History (2y)
+        hist = t.history(period="2y")
+        if hist.empty:
+            return pd.DataFrame()
+            
+        merged_df = pd.DataFrame(index=hist.index)
+        merged_df['Close'] = hist['Close']
+        
+        # 4. Merge EPS onto Price Dates
+        # We want the known TTM EPS for each day.
+        # Join earnings dates to price dates.
+        # Since earnings dates are sparse, we use reindex + ffill.
+        # Note: Earnings Date is when the market knows the new EPS.
+        
+        # Create a series indexed by date for TTM EPS
+        eps_series = ed['TTM_EPS']
+        
+        # Reindex EPS series to match price index (union of indices first to handle gaps?)
+        # Better: use merge_asof or reindex with method='ffill'
+        # But we need to be careful about timezone. yfinance price index is usually tz-aware.
+        # earnings_dates index is also tz-aware usually.
+        
+        # Ensure timezone compatibility
+        if eps_series.index.tz is None and hist.index.tz is not None:
+             eps_series.index = eps_series.index.tz_localize(hist.index.tz)
+        elif eps_series.index.tz is not None and hist.index.tz is None:
+             eps_series.index = eps_series.index.tz_localize(None)
+        elif eps_series.index.tz != hist.index.tz:
+             eps_series.index = eps_series.index.tz_convert(hist.index.tz)
+             
+        # Reindex and forward fill
+        # We only want dates present in price history
+        aligned_eps = eps_series.reindex(hist.index, method='ffill')
+        
+        # 5. Calculate Bands
+        merged_df['PE_15x'] = aligned_eps * 15
+        merged_df['PE_20x'] = aligned_eps * 20
+        merged_df['PE_25x'] = aligned_eps * 25
+        
+        return merged_df
+        
+    except Exception as e:
+        print(f"Error calculating PE Band data: {e}")
+        return pd.DataFrame()
+
 

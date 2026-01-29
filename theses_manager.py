@@ -6,7 +6,7 @@ from datetime import datetime
 THESES_FILE = "theses.json"
 
 def load_theses():
-    """Lengths the existing theses from the JSON file."""
+    """Loads the existing theses from the JSON file."""
     if not os.path.exists(THESES_FILE):
         return []
     try:

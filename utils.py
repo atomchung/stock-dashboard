@@ -5,7 +5,6 @@ from duckduckgo_search import DDGS # Restored for Deep Search
 import obb_utils
 import json
 
-# import google.generativeai as genai # Deprecated: Moved to agent.py (Removed)
 import os
 import requests
 
@@ -15,6 +14,12 @@ def get_stock_data(ticker_symbol):
     Fetches the yfinance Ticker object and basic info using OpenBB/Fallback.
     """
     return obb_utils.get_stock_data(ticker_symbol)
+
+def get_earnings_dates(ticker_symbol):
+    """
+    Returns confirmed future earnings date using obb_utils (Centralized).
+    """
+    return obb_utils.get_calendar_events(ticker_symbol)
 
 def get_news(ticker_symbol):
     """
@@ -273,8 +278,11 @@ def get_sankey_data(ticker_symbol, financials, segments_json, agent=None):
         
         # === Tier 3: Use cached/inferred structure OR fallback ===
         if cached_structure:
+            # === DYNAMIC ADJUSTMENT ===
+            structure_to_use = _refine_structure_for_negatives(ticker_symbol, recent_dict, cached_structure)
+            
             return _build_sankey_from_structure(
-                ticker_symbol, recent_dict, cached_structure, period_label, segments_json
+                ticker_symbol, recent_dict, structure_to_use, period_label, segments_json
             )
         else:
             # Fallback to simplified fixed structure
@@ -283,6 +291,96 @@ def get_sankey_data(ticker_symbol, financials, segments_json, agent=None):
     except Exception as e:
         print(f"Sankey Error: {e}")
         return None
+
+
+def _refine_structure_for_negatives(ticker, data, structure):
+    """
+    Dynamically adjusts the Sankey structure if specific financial inconsistencies are detected.
+    Scenario: 'Other Income Expense' is negative (Loss), but flows OUT of 'Pretax Income'.
+    Fix: 
+      1. Rename current 'Pretax Income' node to 'Intermediate Sum' (e.g. Operating Results & Interest).
+      2. Insert a new 'Pretax Income' node downstream.
+      3. Reroute 'Tax' and 'Net Income' to flow from the new 'Pretax Income' node.
+    """
+    import copy
+    refined = copy.deepcopy(structure)
+    
+    other_val = data.get('Other Income Expense', 0)
+    
+    # Only apply if Other Income is Negative (Expense)
+    if other_val >= 0:
+        return refined
+        
+    links = refined.get('links', [])
+    nodes = refined.get('nodes', [])
+    
+    # Check if we have the problematic link: Pretax Income -> Other Income Expense
+    problem_link = next((l for l in links if l.get('source') == 'Pretax Income' and 
+                         (l.get('target') == 'Other Income Expense' or l.get('field') == 'Other Income Expense')), None)
+    
+    if problem_link:
+        print(f"[{ticker}] Detected Negative Other Income flowing from Pretax Income. Adjusting topology...")
+        
+        # 1. Rename existing 'Pretax Income' node to something more accurate
+        #    This node currently holds (Op Income + Interest), which effectively includes the money used for Other Expense
+        pretax_node = next((n for n in nodes if n.get('name') == 'Pretax Income'), None)
+        if pretax_node:
+            pretax_node['name'] = 'Operating Results & Interest'
+            
+        # 2. Update the problematic link (Other Expense) to source from this renamed node
+        #    (Since we just renamed the node in the node list, we update the link source name to match)
+        problem_link['source'] = 'Operating Results & Interest'
+        
+        # 3. Create a NEW 'Pretax Income' node
+        #    Layer should be same as 'Operating Results & Interest' (2) or slightly shifted? 
+        #    Let's keep it at layer 2 to align with others, or pushing to 2.5 (visually handled by plotly usually)
+        new_pretax = {
+            "name": "Pretax Income",
+            "layer": 2
+        }
+        nodes.append(new_pretax)
+        
+        # 4. Create a link from 'Operating Results & Interest' -> 'Pretax Income'
+        #    The value implies passing the remaining profit.
+        #    We don't need to specify value here, _build_sankey... calculates it.
+        #    But we need a field mapping? 
+        #    Actually, in _build_sankey, value is fetched from data[field]. 
+        #    The dataframe has 'Pretax Income' = 20M. 
+        #    So we map this link to field 'Pretax Income'.
+        main_flow_link = {
+            "source": "Operating Results & Interest",
+            "target": "Pretax Income",
+            "field": "Pretax Income"
+        }
+        links.append(main_flow_link)
+        
+        # 5. Retarget Tax and Net Income to source from the NEW 'Pretax Income'
+        for link in links:
+            if link.get('source') == 'Pretax Income' and link != problem_link:
+                # This catches Tax and Net Income (old source name was Pretax Income)
+                link['source'] = 'Pretax Income'
+                
+                # However, since we defined the new node with name 'Pretax Income', 
+                # and the old node object was renamed to 'Operating Results...', 
+                # any link referencing 'Pretax Income' as source is essentially broken 
+                # unless we align the strings.
+                
+                # Wait, the 'links' list just uses string names.
+                # In Step 1 we changed the NODE's name property. 
+                # We did NOT change the strings in the LINK objects (except problem_link).
+                # So currently, links still say source="Pretax Income".
+                # The NEW node is named "Pretax Income".
+                # So logically, these links typically AUTO-CONNECT to the new node!
+                # EXCEPT: We want problem_link to connect to 'Operating Results'.
+                
+                # So:
+                # - Problem Link source set to 'Operating Results & Interest' (DONE in step 2)
+                # - New Main Flow Link source set to 'Operating Results & Interest' (DONE in step 4)
+                # - Old, "good" links (Tax, Net Income) source is 'Pretax Income'.
+                #   They will now attach to the NEW 'Pretax Income' node we added.
+                pass
+
+    return refined
 
 
 def _build_sankey_from_structure(ticker_symbol, recent_dict, structure, period_label, segments_json):
@@ -624,3 +722,11 @@ def get_polymarket_data(ticker_symbol, company_name=None, extra_keywords=None):
     except Exception as e:
         print(f"Error fetching Polymarket data: {e}")
         return []
+
+def get_pe_band_data(ticker_symbol):
+    """
+    Calculates PE Bands (15x, 20x, 25x) based on Trailing EPS.
+    Returns a DataFrame with Close Price and PE Band lines.
+    Delegates to obb_utils implementation.
+    """
+    return obb_utils.get_pe_band_data(ticker_symbol)

@@ -1,9 +1,9 @@
 
-import google.generativeai as genai
 import json
 import logging
 from typing import Dict, List, Optional, Any, TypedDict, Union
 import os
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,53 +53,66 @@ def clean_json_text(text: str) -> str:
 # --- StockAgent Class ---
 
 class StockAgent:
-    # Model selection: Pro for complex reasoning, Flash for simple extraction
-    MODEL_PRO = 'gemini-3-pro-preview'
+    # Valid Models for REST API
+    # User requested Gemini 3.0 Flash. Using the preview versions available in the API list.
+    MODEL_PRO = 'gemini-3-flash-preview' # Using Flash for speed as requested, or 'gemini-3-pro-preview'
     MODEL_FLASH = 'gemini-3-flash-preview'
     
     def __init__(self, api_key: str, ticker: str):
         self.api_key = api_key
         self.ticker = ticker
-        
-        # Configure GenAI with dual models
-        if self.api_key:
-            genai.configure(api_key=self.api_key)
-            self.model_pro = genai.GenerativeModel(self.MODEL_PRO)
-            self.model_flash = genai.GenerativeModel(self.MODEL_FLASH)
-        else:
-            self.model_pro = None
-            self.model_flash = None
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
     def _generate(self, prompt: str, use_json: bool = False, use_pro: bool = False) -> str:
         """
-        Internal helper to call Gemini with error handling.
-        
-        Args:
-            prompt: The prompt to send
-            use_json: Whether to expect JSON output
-            use_pro: If True, use Pro model for complex reasoning. If False, use Flash for speed.
+        Internal helper to call Gemini REST API with error handling and timeout.
         """
-        model = self.model_pro if use_pro else self.model_flash
-        model_name = self.MODEL_PRO if use_pro else self.MODEL_FLASH
-        
-        if not model:
+        if not self.api_key:
             return "Error: API Key missing."
-        
-        try:
-            # Add base instructions
-            full_prompt = f"{BASE_INSTRUCTIONS}\n\n{prompt}"
-            
-            # Configure generation config
-            generation_config = genai.types.GenerationConfig(
-                temperature=0.2,  # Low temp for factual analysis
-            )
-            if use_json:
-                 # Note: explicitly asking for JSON in prompt is often safer than forcing MIME type
-                 pass
 
-            response = model.generate_content(full_prompt, generation_config=generation_config)
-            logger.debug(f"Used model: {model_name}")
-            return response.text
+        model_name = self.MODEL_PRO if use_pro else self.MODEL_FLASH
+        url = f"{self.base_url}/{model_name}:generateContent?key={self.api_key}"
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # Add base instructions
+        full_prompt = f"{BASE_INSTRUCTIONS}\n\n{prompt}"
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": full_prompt}]
+            }],
+            "generationConfig": {
+                "temperature": 0.2
+            }
+        }
+        
+        if use_json:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+
+        try:
+            # Enforce 30 second timeout to prevent hanging (increased from 15s)
+            logger.debug(f"Calling Gemini REST API ({model_name})...")
+            response = requests.post(url, headers=headers, json=payload, timeout=30.0)
+            
+            if response.status_code != 200:
+                logger.error(f"Gemini API Error {response.status_code}: {response.text}")
+                return f"Error: API returned {response.status_code}"
+                
+            data = response.json()
+            # Extract text from response
+            try:
+                text = data['candidates'][0]['content']['parts'][0]['text']
+                return text
+            except (KeyError, IndexError):
+                logger.error(f"Unexpected API response format: {data}")
+                return "Error: Malformed API response"
+                
+        except requests.exceptions.Timeout:
+            logger.error(f"Gemini API Timeout (30s)")
+            return "Error: Request Timed Out"
         except Exception as e:
             logger.error(f"Gemini Generation Error ({model_name}): {e}")
             return f"Error analyzing data: {str(e)}"
@@ -225,22 +238,108 @@ Format: "The core debate is whether [specific metric/event] will [specific outco
 """
         return self._generate(prompt, use_pro=True)  # Pro: complex multi-factor reasoning
 
-    def analyze_events(self, context_results: List[Dict]) -> str:
-        """Generates Past/Future event timeline."""
-        if not self.check_api_key(): return "No API Key."
-        if not context_results: return "No event info found."
+    def analyze_strategic_intelligence(self, context_results: List[Dict], news_context: Optional[List[Dict]] = None, company_info: Optional[Dict] = None) -> str:
+        """
+        Combines Executive Pulse (News) and Strategic Thesis (Bull/Bear) into a coherent intelligence report.
+        """
+        if not self.check_api_key(): return "Please provide a gemini API Key."
+        
+        # Build context text with source attribution
+        context_text = "\n".join([
+            f"- [{item.get('source', 'Unknown')}] {item.get('title', '')}: {item.get('body', '')}"
+            for item in context_results
+        ])
+        
+        # Build News Context
+        news_text = "No recent news available."
+        if news_context:
+            news_text = "\n".join([
+                f"- {item.get('date', '')} {item.get('title', '')}: {item.get('body', '')[:200]}"
+                for item in news_context[:8]
+            ])
+        
+        from datetime import datetime
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        
+        company_name = company_info.get('shortName', self.ticker) if company_info else self.ticker
+        sector = company_info.get('sector', 'Unknown') if company_info else 'Unknown'
+        
+        prompt = f"""
+**Task**: Generate a Strategic Intelligence Report for {self.ticker} ({company_name}).
+**Date**: {current_date}
+**Sector**: {sector}
 
+**Goal**: Merge short-term market sentiment with long-term strategic analysis. ensure coherence between news and thesis.
+
+**Input 1: Deep Strategic Context (Earnings/Analyst Reports)**:
+{context_text[:12000]}
+
+**Input 2: Recent Market News (Last 7 Days)**:
+{news_text}
+
+---
+
+**OUTPUT SECTIONS** (Use Markdown):
+
+### 📡 Market Pulse (Executive Summary)
+- **Sentiment**: 1 sentence on the immediate mood (Bullish/Bearish/Neutral).
+- **Top Catalyst**: 1-2 sentences on the single most critical news item or event driving price right now.
+- *Constraint*: Be extremely concise. Do not list articles.
+
+### 🛡️ Strategic Thesis (Bull/Bear)
+*Synthesis of long-term fundamentals.*
+
+**🐂 Bull Case**
+- **Growth Engine**: specific metric/product driving upside (cite numbers).
+- **Margin Story**: profitability trend.
+- **Moat**: competitive advantage or unique positioning.
+
+**🐻 Bear Case**
+- **Core Risk**: specific financial or operational danger (cite numbers).
+- **Competition**: threat from specific rival.
+- **Valuation**: is it priced for perfection?
+
+**🔑 Key Variance**
+- The one critical debate that will determine the stock's future (e.g. "Can AI revenue grow fast enough to justify 50x PE?").
+
+---
+**Rules**:
+1. If news contradicts strategy (e.g. "Strong Growth" thesis but "CEO Fired" news), highlight the conflict in the Market Pulse.
+2. Use specific numbers and dates.
+3. No fluff.
+"""
+        return self._generate(prompt, use_pro=True)
+
+    def analyze_events(self, context_results: List[Dict], confirmed_dates: Optional[Dict] = None) -> str:
+        """Generates Past/Future event timeline with API-confirmed dates."""
+        if not self.check_api_key(): return "No API Key."
+        
         context_text = "\n".join([f"- {item.get('title')} ({item.get('date', '')}): {item.get('body')}" for item in context_results])
+
+        # Format confirmed dates
+        dates_text = ""
+        if confirmed_dates:
+            if confirmed_dates.get('next_earnings'):
+                 dates_text += f"- **CONFIRMED NEXT EARNINGS**: {confirmed_dates['next_earnings']}\n"
+            if confirmed_dates.get('dividend_date'):
+                 dates_text += f"- **DIVIDEND DATE**: {confirmed_dates['dividend_date']}\n"
+            if confirmed_dates.get('ex_dividend'):
+                 dates_text += f"- **EX-DIVIDEND**: {confirmed_dates['ex_dividend']}\n"
 
         prompt = f"""
         **Task**: Identify Major Corporate Events for {self.ticker}.
         
-        **Context**:
+        **API-Confirmed Dates (PRIORITIZE THESE for "Upcoming Catalysts")**:
+        {dates_text if dates_text else "No confirmed API dates found."}
+        
+        **Context (Use for past events and unofficial future events)**:
         {context_text}
         
         **Output Requirements**:
         - **🕒 Recent Highlights (Past 3 Months)**: List completion dates and events.
-        - **🔮 Upcoming Catalysts (Next 3 Months)**: STRICTLY prioritize confirmed dates (Earnings, Investor Days).
+        - **🔮 Upcoming Catalysts (Next 3 Months)**: 
+            - **MANDATORY**: You MUST include the 'CONFIRMED NEXT EARNINGS' date from above if available.
+            - List other product launches, FDA approvals etc.
         
         Format as clear bullet points. If no upcoming events, explicitly state it.
         """

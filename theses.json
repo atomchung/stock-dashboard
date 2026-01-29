@@ -38,5 +38,25 @@
         "confidence": 4,
         "status": "Active",
         "created_at": "2026-01-25 16:36:08"
+    },
+    {
+        "id": "c60e4747-03a8-41ed-a2a9-f333f90e1f03",
+        "ticker": "PLTR",
+        "thesis_statement": "1.ai \u61c9\u7528\u7684\u5f37\u529b\u53d7\u76ca\u8005\n2. \u5c0d\u885d\u53f0\u6d77\u5371\u6a5f\n3. \u5728\u696d\u52d9\u4e0a\u6709\u7368\u4f54",
+        "falsification_condition": "1. \u51fa\u73fe\u660e\u986f\u7af6\u722d\u8005",
+        "time_horizon": "3-6 Months",
+        "confidence": 7,
+        "status": "Active",
+        "created_at": "2026-01-26 21:17:08"
+    },
+    {
+        "id": "6e2063ee-7359-4af0-8f01-f1f4cee713eb",
+        "ticker": "PLTR",
+        "thesis_statement": "1.ai \u61c9\u7528\u7684\u5f37\u529b\u53d7\u76ca\u8005\n2. \u5c0d\u885d\u53f0\u6d77\u5371\u6a5f\n3. \u5728\u696d\u52d9\u4e0a\u6709\u7368\u4f54",
+        "falsification_condition": "1. \u51fa\u73fe\u660e\u986f\u7af6\u722d\u8005",
+        "time_horizon": "3-6 Months",
+        "confidence": 7,
+        "status": "Active",
+        "created_at": "2026-01-26 21:17:11"
     }
 ]

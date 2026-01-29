@@ -106,17 +106,25 @@ def render_dashboard(api_key, ticker_symbol):
                 
                 st.session_state['signals'] = utils.analyze_investment_signals(st.session_state['info'], st.session_state['history_df'])
                 
+                # Pre-fetch PE Band data (instead of during render)
+                st.session_state['pe_band_df'] = utils.get_pe_band_data(ticker_symbol)
+                
                 st.session_state['segments_json'] = "[]"
                 st.session_state['core_driver'] = "N/A"
                 
                 if api_key:
+                    print(f"DEBUG: Initializing Agent for {ticker_symbol}...")
                     agent = StockAgent(api_key, ticker_symbol)
                     # st.session_state['agent'] removed to prevent pickling error
                     
                     with st.spinner("Extracting Revenue Segments & Drivers..."):
+                        print(f"DEBUG: Searching revenue segments (DDG)...")
                         seg_context = utils.search_revenue_segments(ticker_symbol)
+                        print(f"DEBUG: Found {len(seg_context)} raw segments. Extracting (Gemini)...")
                         st.session_state['segments_json'] = agent.extract_revenue_segments(seg_context)
+                        print(f"DEBUG: Segments extracted. Identifying driver...")
                         st.session_state['core_driver'] = agent.identify_core_driver(st.session_state['news'])
+                        print(f"DEBUG: Driver identified.")
 
                 
                 st.session_state['data_loaded'] = True
@@ -184,17 +192,52 @@ def render_dashboard(api_key, ticker_symbol):
             fig.update_yaxes(title_text="RSI", range=[0, 100], row=3, col=1)
             st.plotly_chart(fig, use_container_width=True)
 
+            # PE Band Chart
+            st.divider()
+            st.subheader("📊 PE Ratio Bands (Valuation)")
+            
+            # Robust retrieval: Use cached, or fetch if missing (e.g. old session state)
+            pe_band_df = st.session_state.get('pe_band_df', pd.DataFrame())
+            if pe_band_df.empty and ticker_symbol:
+                 # Fallback for existing sessions that haven't re-fetched data
+                 with st.spinner(f"Loading PE Bands for {ticker_symbol}..."):
+                     pe_band_df = utils.get_pe_band_data(ticker_symbol)
+                     st.session_state['pe_band_df'] = pe_band_df
+            
+            if not pe_band_df.empty:
+                fig_pe = go.Figure()
+                
+                # Plot Bands first (background lines)
+                fig_pe.add_trace(go.Scatter(x=pe_band_df.index, y=pe_band_df['PE_25x'], line=dict(color='rgba(231, 76, 60, 0.5)', width=1, dash='dash'), name='25x PE'))
+                fig_pe.add_trace(go.Scatter(x=pe_band_df.index, y=pe_band_df['PE_20x'], line=dict(color='rgba(230, 126, 34, 0.5)', width=1, dash='dash'), name='20x PE'))
+                fig_pe.add_trace(go.Scatter(x=pe_band_df.index, y=pe_band_df['PE_15x'], line=dict(color='rgba(46, 204, 113, 0.5)', width=1, dash='dash'), name='15x PE'))
+                
+                # Plot Price
+                fig_pe.add_trace(go.Scatter(x=pe_band_df.index, y=pe_band_df['Close'], line=dict(color='white', width=2), name='Price'))
+                
+                fig_pe.update_layout(
+                    title=f"{ticker_symbol} Price vs PE Bands (Trailing EPS)",
+                    xaxis_title="Date",
+                    yaxis_title="Price",
+                    height=500,
+                    hovermode="x unified",
+                    showlegend=True
+                )
+                st.plotly_chart(fig_pe, use_container_width=True)
+            else:
+                st.info("Insufficient earnings data to generate PE Bands.")
+
         if api_key:
             st.divider()
-            st.subheader("🧠 Core Strategic Focus (Bull vs Bear)")
+            st.subheader("🛡️ Strategic Intelligence")
             if 'strategy_summary' not in st.session_state:
                  agent = StockAgent(api_key, ticker_symbol)
-                 with st.spinner("Synthesizing Strategy (Bull/Bear)..."):
+                 with st.spinner("Synthesizing Intelligence (Market Pulse + Strategy)..."):
                      context = utils.search_earnings_context(ticker_symbol)
                      # Pass company info and news for better context
                      company_info = st.session_state.get('info', {})
                      news_context = st.session_state.get('news', [])
-                     st.session_state['strategy_summary'] = agent.analyze_strategy(context, news_context, company_info)
+                     st.session_state['strategy_summary'] = agent.analyze_strategic_intelligence(context, news_context, company_info)
 
             st.markdown(st.session_state['strategy_summary'])
 
@@ -204,19 +247,15 @@ def render_dashboard(api_key, ticker_symbol):
         
         with tab_news:
             if api_key:
-                st.subheader("🤖 AI Executive Summary")
-                with st.spinner("Generating AI News Summary..."):
-                    agent = StockAgent(api_key, ticker_symbol)
-                    if 'news_summary' not in st.session_state:
-                         st.session_state['news_summary'] = agent.analyze_news(news)
-                    st.markdown(st.session_state['news_summary'])
+                # Executive Summary merged into Strategic Intelligence above.
                 
-                st.divider()
                 st.subheader("🗓️ Major Events Timeline (Past & Future)")
                 with st.spinner("Identifying Key Events & Catalysts..."):
                      if 'evt_summary' not in st.session_state:
                           evt_context = utils.search_key_events(ticker_symbol)
-                          st.session_state['evt_summary'] = agent.analyze_events(evt_context)
+                          confirmed_dates = utils.get_earnings_dates(ticker_symbol)
+                          agent = StockAgent(api_key, ticker_symbol)
+                          st.session_state['evt_summary'] = agent.analyze_events(evt_context, confirmed_dates)
                      st.markdown(st.session_state['evt_summary'])
 
                      
@@ -547,7 +586,7 @@ def render_dashboard(api_key, ticker_symbol):
                         c1, c2 = st.columns([1, 5])
                         if c1.button("🗑️", key=f"del_{t['id']}"):
                             theses_manager.delete_thesis(t['id'])
-                            st.experimental_rerun()
+                            st.rerun()
                             
                         if c2.button("Edit", key=f"edit_{t['id']}"):
                             st.session_state["draft_fn_statement"] = t["thesis_statement"]
@@ -555,7 +594,7 @@ def render_dashboard(api_key, ticker_symbol):
                             st.session_state["draft_fn_horizon"] = t["time_horizon"]
                             st.session_state["draft_fn_confidence"] = int(t["confidence"])
                             st.session_state["draft_thesis_id"] = t["id"]
-                            st.experimental_rerun()
+                            st.rerun()
     else:
         st.info("Enter a stock ticker and click 'Get Data' to start.")
 
@@ -654,11 +693,11 @@ def render_journal(api_key):
                     })
                     theses_manager.save_thesis(updated_thesis)
                     st.session_state[f"edit_mode_{t['id']}"] = False
-                    st.experimental_rerun()
+                    st.rerun()
                     
                 if cb.button("❌ Cancel", key=f"cancel_{t['id']}"):
                     st.session_state[f"edit_mode_{t['id']}"] = False
-                    st.experimental_rerun()
+                    st.rerun()
             else:
                 # View Mode - Visual Enhancement
                 
@@ -683,11 +722,11 @@ def render_journal(api_key):
                 ca, cb = st.columns([1, 4])
                 if ca.button("Delete", key=f"j_del_{t['id']}"):
                     theses_manager.delete_thesis(t['id'])
-                    st.experimental_rerun()
+                    st.rerun()
                     
                 if cb.button("Edit", key=f"j_edit_{t['id']}"):
                     st.session_state[f"edit_mode_{t['id']}"] = True
-                    st.experimental_rerun()
+                    st.rerun()
 
 def main():
     st.title("📈 Investment Dashboard Pro")
