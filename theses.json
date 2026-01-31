@@ -50,13 +50,13 @@
         "created_at": "2026-01-26 21:17:08"
     },
     {
-        "id": "6e2063ee-7359-4af0-8f01-f1f4cee713eb",
-        "ticker": "PLTR",
-        "thesis_statement": "1.ai \u61c9\u7528\u7684\u5f37\u529b\u53d7\u76ca\u8005\n2. \u5c0d\u885d\u53f0\u6d77\u5371\u6a5f\n3. \u5728\u696d\u52d9\u4e0a\u6709\u7368\u4f54",
-        "falsification_condition": "1. \u51fa\u73fe\u660e\u986f\u7af6\u722d\u8005",
-        "time_horizon": "3-6 Months",
+        "id": "ddf5d744-0d5b-4fd4-ab2e-5dc3e5b428b4",
+        "ticker": "ORCL",
+        "thesis_statement": "1. Open ai \u80fd\u627e\u5230\u73fe\u91d1\u6d41\uff0c\u77ed\u6642\u9593\u5167\u4e0d\u6703\u6c92\u9322\u4ed8\u6b3e\n2. meta \u7684\u8a08\u5283\u4ecd\u7136\u4f9d\u8cf4 orcl\n3. orcl \u8001\u724c\u516c\u53f8\u7684\u84cb\u5ee0\u80fd\u529b\u8d85\u904e neo cloud",
+        "falsification_condition": "1. orcl \u84cb\u4e0d\u51fa\u4f86\uff0c\u9032\u5ea6\u660e\u986f\u4f4e\u65bc\u5176\u4ed6 neo cloud",
+        "time_horizon": "6-12 Months",
         "confidence": 7,
         "status": "Active",
-        "created_at": "2026-01-26 21:17:11"
+        "created_at": "2026-01-31 17:31:48"
     }
 ]

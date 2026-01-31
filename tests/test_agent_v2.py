@@ -18,7 +18,8 @@ def test_agent_structure():
         "analyze_news", "analyze_strategy", "analyze_events", 
         "analyze_financials", "extract_revenue_segments", 
         "identify_core_driver", "identify_competitors", 
-        "get_branding_keywords", "generate_thesis", "refine_thesis"
+        "get_branding_keywords", "generate_thesis", "refine_thesis",
+        "_generate_stream"
     ]
     
     for m in methods:

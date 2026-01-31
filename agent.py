@@ -63,7 +63,7 @@ class StockAgent:
         self.ticker = ticker
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    def _generate(self, prompt: str, use_json: bool = False, use_pro: bool = False) -> str:
+    def _generate(self, prompt: str, use_json: bool = False, use_pro: bool = False, timeout: float = 30.0) -> str:
         """
         Internal helper to call Gemini REST API with error handling and timeout.
         """
@@ -93,9 +93,8 @@ class StockAgent:
             payload["generationConfig"]["responseMimeType"] = "application/json"
 
         try:
-            # Enforce 30 second timeout to prevent hanging (increased from 15s)
-            logger.debug(f"Calling Gemini REST API ({model_name})...")
-            response = requests.post(url, headers=headers, json=payload, timeout=30.0)
+            logger.debug(f"Calling Gemini REST API ({model_name}) with {timeout}s timeout...")
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
             
             if response.status_code != 200:
                 logger.error(f"Gemini API Error {response.status_code}: {response.text}")
@@ -111,11 +110,72 @@ class StockAgent:
                 return "Error: Malformed API response"
                 
         except requests.exceptions.Timeout:
-            logger.error(f"Gemini API Timeout (30s)")
+            logger.error(f"Gemini API Timeout ({timeout}s)")
             return "Error: Request Timed Out"
         except Exception as e:
             logger.error(f"Gemini Generation Error ({model_name}): {e}")
             return f"Error analyzing data: {str(e)}"
+
+    def _generate_stream(self, prompt: str, use_pro: bool = False, timeout: float = 60.0):
+        """
+        Internal helper to call Gemini REST API with streaming support.
+        Yields chunks of text.
+        """
+        if not self.api_key:
+            yield "Error: API Key missing."
+            return
+
+        model_name = self.MODEL_PRO if use_pro else self.MODEL_FLASH
+        url = f"{self.base_url}/{model_name}:streamGenerateContent?key={self.api_key}&alt=sse"
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        full_prompt = f"{BASE_INSTRUCTIONS}\n\n{prompt}"
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": full_prompt}]
+            }],
+            "generationConfig": {
+                "temperature": 0.2
+            }
+        }
+
+        try:
+            logger.debug(f"Calling Gemini Streaming API ({model_name})...")
+            # Using stream=True for requests
+            with requests.post(url, headers=headers, json=payload, timeout=timeout, stream=True) as response:
+                if response.status_code != 200:
+                    logger.error(f"Gemini Streaming Error {response.status_code}: {response.text}")
+                    yield f"Error: API returned {response.status_code}"
+                    return
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    
+                    line_text = line.decode('utf-8')
+                    if line_text.startswith("data: "):
+                        try:
+                            json_str = line_text[6:].strip()
+                            chunk_data = json.loads(json_str)
+                            if 'candidates' in chunk_data and chunk_data['candidates']:
+                                part = chunk_data['candidates'][0].get('content', {}).get('parts', [{}])[0]
+                                text_chunk = part.get('text', '')
+                                if text_chunk:
+                                    yield text_chunk
+                        except Exception as parse_error:
+                            logger.error(f"Error parsing SSE chunk: {parse_error}")
+                            continue
+
+        except requests.exceptions.Timeout:
+            logger.error(f"Gemini Stream Timeout ({timeout}s)")
+            yield "Error: Request Timed Out"
+        except Exception as e:
+            logger.error(f"Gemini Streaming Error: {e}")
+            yield f"Error during streaming: {str(e)}"
 
     def check_api_key(self) -> bool:
         return bool(self.api_key)
@@ -238,7 +298,7 @@ Format: "The core debate is whether [specific metric/event] will [specific outco
 """
         return self._generate(prompt, use_pro=True)  # Pro: complex multi-factor reasoning
 
-    def analyze_strategic_intelligence(self, context_results: List[Dict], news_context: Optional[List[Dict]] = None, company_info: Optional[Dict] = None) -> str:
+    def analyze_strategic_intelligence(self, context_results: List[Dict], news_context: Optional[List[Dict]] = None, company_info: Optional[Dict] = None, stream: bool = False) -> Union[str, Any]:
         """
         Combines Executive Pulse (News) and Strategic Thesis (Bull/Bear) into a coherent intelligence report.
         """
@@ -308,6 +368,8 @@ Format: "The core debate is whether [specific metric/event] will [specific outco
 2. Use specific numbers and dates.
 3. No fluff.
 """
+        if stream:
+            return self._generate_stream(prompt, use_pro=True)
         return self._generate(prompt, use_pro=True)
 
     def analyze_events(self, context_results: List[Dict], confirmed_dates: Optional[Dict] = None) -> str:
@@ -345,8 +407,8 @@ Format: "The core debate is whether [specific metric/event] will [specific outco
         """
         return self._generate(prompt, use_pro=False)  # Flash: structured extraction
 
-    def analyze_financials(self, context_results: List[Dict]) -> str:
-        """Explains WHY financial metrics changed."""
+    def analyze_financials(self, context_results: List[Dict], stream: bool = False) -> Union[str, Any]:
+        """Explains WHY financial metrics changed with 60s timeout and retry logic."""
         if not self.check_api_key(): return "No API Key."
         if not context_results: return "No financial analysis found."
 
@@ -365,7 +427,28 @@ Format: "The core debate is whether [specific metric/event] will [specific outco
         
         **Constraint**: Be specific. Use numbers from text (e.g. "Cloud grew 20%").
         """
-        return self._generate(prompt, use_pro=True)  # Pro: financial reasoning
+        
+        if stream:
+            return self._generate_stream(prompt, use_pro=True, timeout=60.0)
+            
+        # For non-streaming, implement retry logic with simplified prompt
+        res = self._generate(prompt, use_pro=True, timeout=60.0)
+        
+        if res == "Error: Request Timed Out":
+            logger.info(f"Financial analysis timed out for {self.ticker}, retrying with simplified prompt...")
+            simplified_prompt = f"""
+            **Task**: Provide a QUICK summary of {self.ticker}'s financial performance.
+            
+            **Context (First 2000 chars)**:
+            {context_text[:2000]}
+            
+            **Simplified Sections**:
+            1. Revenue & Profit Drivers
+            2. Any critical financial risks or highlights.
+            """
+            return self._generate(simplified_prompt, use_pro=False, timeout=30.0)
+            
+        return res
 
     def extract_revenue_segments(self, context_results: List[Dict]) -> str:
         """Extracts revenue segments as JSON."""

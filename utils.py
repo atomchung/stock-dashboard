@@ -691,6 +691,10 @@ def get_polymarket_data(ticker_symbol, company_name=None, extra_keywords=None):
             title_lower = title.lower()
             if not any(term in title_lower for term in filter_terms):
                 continue
+            
+            # Skip Closed/Archived Events or Markets
+            if event.get('closed') or mk.get('closed') or event.get('archived'):
+                continue
             # ------------------------
 
             volume = float(mk.get('volume', 0))

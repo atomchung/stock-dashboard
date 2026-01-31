@@ -361,37 +361,45 @@ def get_calendar_events(ticker_symbol):
         ticker = yf.Ticker(ticker_symbol)
         calendar = ticker.calendar
         
-        if calendar is not None and not calendar.empty:
-            # Handle both Dict and DataFrame formats from yfinance
+        if calendar is not None:
+            # Check if it's a non-empty dict or non-empty DataFrame
+            is_empty = False
             if isinstance(calendar, dict):
-                earnings = calendar.get('Earnings Date')
-                div = calendar.get('Dividend Date')
-                ex_div = calendar.get('Ex-Dividend Date')
-            else:
-                try:
-                    earnings = calendar.loc['Earnings Date'].values if 'Earnings Date' in calendar.index else None
-                    div = calendar.loc['Dividend Date'].values if 'Dividend Date' in calendar.index else None
-                    ex_div = calendar.loc['Ex-Dividend Date'].values if 'Ex-Dividend Date' in calendar.index else None
-                except:
-                    earnings = None
-                    div = None
-                    ex_div = None
+                is_empty = len(calendar) == 0
+            elif hasattr(calendar, 'empty'):
+                is_empty = calendar.empty
+            
+            if not is_empty:
+                # Handle both Dict and DataFrame formats from yfinance
+                if isinstance(calendar, dict):
+                    earnings = calendar.get('Earnings Date')
+                    div = calendar.get('Dividend Date')
+                    ex_div = calendar.get('Ex-Dividend Date')
+                else:
+                    try:
+                        earnings = calendar.loc['Earnings Date'].values if 'Earnings Date' in calendar.index else None
+                        div = calendar.loc['Dividend Date'].values if 'Dividend Date' in calendar.index else None
+                        ex_div = calendar.loc['Ex-Dividend Date'].values if 'Ex-Dividend Date' in calendar.index else None
+                    except:
+                        earnings = None
+                        div = None
+                        ex_div = None
 
-            # Only use yfinance earnings if FMP didn't find any
-            if not dates.get('next_earnings') and earnings is not None:
-                val = earnings[0] if (isinstance(earnings, list) or hasattr(earnings, '__iter__')) and len(earnings) > 0 else earnings
-                if val: 
-                    dates['next_earnings'] = str(val)
-                    dates['source'] = 'yfinance'
+                # Only use yfinance earnings if FMP didn't find any
+                if not dates.get('next_earnings') and earnings is not None:
+                    # calendar.get('Earnings Date') returns a list usually
+                    val = earnings[0] if (isinstance(earnings, list) or hasattr(earnings, '__iter__')) and len(earnings) > 0 else earnings
+                    if val: 
+                        dates['next_earnings'] = str(val)
+                        dates['source'] = 'yfinance'
 
-            if div is not None:
-                val = div[0] if (isinstance(div, list) or hasattr(div, '__iter__')) and len(div) > 0 else div
-                if val: dates['dividend_date'] = str(val)
+                if div is not None:
+                    val = div[0] if (isinstance(div, list) or hasattr(div, '__iter__')) and len(div) > 0 else div
+                    if val: dates['dividend_date'] = str(val)
 
-            if ex_div is not None:
-                val = ex_div[0] if (isinstance(ex_div, list) or hasattr(ex_div, '__iter__')) and len(ex_div) > 0 else ex_div
-                if val: dates['ex_dividend'] = str(val)
-                
+                if ex_div is not None:
+                    val = ex_div[0] if (isinstance(ex_div, list) or hasattr(ex_div, '__iter__')) and len(ex_div) > 0 else ex_div
+                    if val: dates['ex_dividend'] = str(val)
     except Exception as e:
         print(f"[yfinance] Error fetching calendar: {e}")
     

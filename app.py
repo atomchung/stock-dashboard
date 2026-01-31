@@ -232,14 +232,19 @@ def render_dashboard(api_key, ticker_symbol):
             st.subheader("🛡️ Strategic Intelligence")
             if 'strategy_summary' not in st.session_state:
                  agent = StockAgent(api_key, ticker_symbol)
-                 with st.spinner("Synthesizing Intelligence (Market Pulse + Strategy)..."):
-                     context = utils.search_earnings_context(ticker_symbol)
-                     # Pass company info and news for better context
+                 with st.status("Synthesizing Intelligence (Market Pulse + Strategy)...", expanded=True) as status:
                      company_info = st.session_state.get('info', {})
                      news_context = st.session_state.get('news', [])
-                     st.session_state['strategy_summary'] = agent.analyze_strategic_intelligence(context, news_context, company_info)
-
-            st.markdown(st.session_state['strategy_summary'])
+                     # Search context remains non-streaming
+                     context = utils.search_earnings_context(ticker_symbol)
+                     
+                     # Stream the content
+                     stream = agent.analyze_strategic_intelligence(context, news_context, company_info, stream=True)
+                     full_response = st.write_stream(stream)
+                     st.session_state['strategy_summary'] = full_response
+                     status.update(label="Intelligence Synthesized!", state="complete", expanded=False)
+            else:
+                 st.markdown(st.session_state['strategy_summary'])
 
         st.divider()
 
@@ -249,11 +254,24 @@ def render_dashboard(api_key, ticker_symbol):
             if api_key:
                 # Executive Summary merged into Strategic Intelligence above.
                 
-                st.subheader("🗓️ Major Events Timeline (Past & Future)")
+                # Use columns to put header and source info side-by-side
+                col_ev_head, col_ev_src = st.columns([0.85, 0.15])
+                with col_ev_head:
+                    st.subheader("🗓️ Major Events Timeline")
+                with col_ev_src:
+                    # Provide source attribution in a popover
+                    confirmed_dates = utils.get_earnings_dates(ticker_symbol)
+                    source_name = confirmed_dates.get('source', 'yfinance/FMP')
+                    with st.popover("ℹ️ Source"):
+                        st.markdown(f"**Data Sources:**")
+                        st.markdown(f"- **Confirmed Dates**: {source_name}")
+                        st.markdown("- **Highlights**: AI News Search (DuckDuckGo)")
+                        st.caption("AI-generated summaries may contain errors.")
+
                 with st.spinner("Identifying Key Events & Catalysts..."):
                      if 'evt_summary' not in st.session_state:
                           evt_context = utils.search_key_events(ticker_symbol)
-                          confirmed_dates = utils.get_earnings_dates(ticker_symbol)
+                          # confirmed_dates already fetched above
                           agent = StockAgent(api_key, ticker_symbol)
                           st.session_state['evt_summary'] = agent.analyze_events(evt_context, confirmed_dates)
                      st.markdown(st.session_state['evt_summary'])
@@ -413,12 +431,17 @@ def render_dashboard(api_key, ticker_symbol):
             if api_key:
                 st.divider()
                 st.subheader("📉 Financial Performance Deep Dive (AI)")
-                with st.spinner("Analyzing financial drivers..."):
-                    agent = StockAgent(api_key, ticker_symbol)
-                    if 'fin_summary' not in st.session_state:
-                         fin_context = utils.search_financial_analysis(ticker_symbol)
-                         st.session_state['fin_summary'] = agent.analyze_financials(fin_context)
-
+                if 'fin_summary' not in st.session_state:
+                    with st.status("Analyzing financial drivers...", expanded=True) as status:
+                        agent = StockAgent(api_key, ticker_symbol)
+                        fin_context = utils.search_financial_analysis(ticker_symbol)
+                        
+                        # Stream the content
+                        stream = agent.analyze_financials(fin_context, stream=True)
+                        full_response = st.write_stream(stream)
+                        st.session_state['fin_summary'] = full_response
+                        status.update(label="Analysis Complete!", state="complete", expanded=False)
+                else:
                     st.markdown(st.session_state['fin_summary'])
         
         with tab_comp:

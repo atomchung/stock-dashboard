@@ -42,17 +42,24 @@ def save_thesis(thesis_data):
         return False, "Failed to load existing theses (File Access Error)."
 
     if "id" not in thesis_data or not thesis_data["id"]:
-        thesis_data["id"] = str(uuid.uuid4())
-        thesis_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         is_new = True
+        # Content-based de-duplication: check if same content exists for this ticker
+        for i, t in enumerate(theses):
+            if t['ticker'] == thesis_data['ticker'] and \
+               t['thesis_statement'].strip() == thesis_data['thesis_statement'].strip():
+                # Found exact duplicate: switch to "update" mode for this record
+                thesis_data['id'] = t['id']
+                thesis_data['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                theses[i] = thesis_data
+                is_new = False
+                break
+        
+        if is_new:
+            thesis_data["id"] = str(uuid.uuid4())
+            thesis_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            theses.append(thesis_data)
     else:
-        is_new = False
         thesis_data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Update list
-    if is_new:
-        theses.append(thesis_data)
-    else:
         found = False
         for i, t in enumerate(theses):
             if t["id"] == thesis_data["id"]:
